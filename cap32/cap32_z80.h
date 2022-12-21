@@ -52,7 +52,9 @@ typedef union
 typedef struct {
    reg_pair AF, BC, DE, HL, PC, SP, AFx, BCx, DEx, HLx, IX, IY;
    uint8_t I, R, Rb7, IFF1, IFF2, IM, HALT, EI_issued, int_pending;
+#ifdef TARGET_GNW
    uint32_t break_point, trace;
+#endif
 } t_z80regs;
 
 #define _A        z80.AF.b.h
@@ -104,8 +106,10 @@ uint8_t z80_IN_handler(reg_pair port); // not provided by Z80.c
 void z80_OUT_handler(reg_pair port, uint8_t val); // not provided by Z80.c
 
 void z80_init_tables(void);
+#ifndef TARGET_GNW
 void z80_mf2stop(void);
-int z80_execute(void);
+#endif
+int cap32_z80_execute(void);
 void z80_pfx_cb(void);
 void z80_pfx_dd(void);
 void z80_pfx_ddcb(void);

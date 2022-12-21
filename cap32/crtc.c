@@ -41,7 +41,7 @@
 
 #include "cap32.h"
 #include "crtc.h"
-#include "z80.h"
+#include "cap32_z80.h"
 #include "asic.h"
 
 extern t_CPC CPC;
@@ -92,6 +92,7 @@ uint16_t MAXlate[0x7400];
 
 void (*PreRender)(void);
 
+#ifndef TARGET_GNW
 // Version 2 translation tables - static
 uint32_t M0Map[0x200] = {
    0x00000000,0x00000000,0x00000000,0x08080808,0x08080808,0x00000000,0x08080808,0x08080808,
@@ -360,6 +361,7 @@ uint32_t M3Map[0x200] = {
    0x03030303,0x01010101,0x03030303,0x01010101,0x03030303,0x01010101,0x03030303,0x01010101,
    0x03030303,0x03030303,0x03030303,0x03030303,0x03030303,0x03030303,0x03030303,0x03030303
 };
+#endif
 
 uint32_t M0hMap[0x100] = {
    0x00000000,0x08080000,0x00000808,0x08080808,0x02020000,0x0A0A0000,0x02020808,0x0A0A0808,
@@ -513,8 +515,10 @@ void update_skew(void)
       CRTC.hstart = skew; // position at which horizontal display starts
       CRTC.hend = CRTC.hstart + CRTC.registers[1]; // position at which it ends
    }
+#ifndef TARGET_GNW
    if(asic.extend_border)
       CRTC.hstart++;
+#endif
 }
 
 static INLINE void change_mode(void)
@@ -524,7 +528,6 @@ static INLINE void change_mode(void)
       GateArray.scr_mode = GateArray.requested_scr_mode; // execute mode change
 
      ModeMap = ModeMaps[GateArray.scr_mode]; // update ModeMap pointer
-
    }
 }
 
@@ -703,7 +706,9 @@ static INLINE void match_hsw(void)
          CRTC.flag_inmonhsync = 1; // enter monitor HSYNC
          iMonHSStartPos = 0;
          iMonHSPeakToStart = iMonHSPeakPos;
+#ifndef TARGET_GNW
          asic_dma_cycle();
+#endif
       } else if (CRTC.hsw_count == 7) { // reached GA HSYNC output cutoff?
          change_mode();
          end_vdu_hsync();
@@ -783,12 +788,13 @@ void frame_finished(void)
 
 
 
+#ifndef TARGET_GNW
 void prerender_border(void)
 {
    memset(RendPos, 0x10, sizeof(*RendPos) * 4);
    RendPos += 4;
 }
-
+#endif
 
 
 void prerender_border_half(void)
@@ -799,6 +805,7 @@ void prerender_border_half(void)
 
 
 
+#ifndef TARGET_GNW
 void prerender_sync(void)
 {
    register uint32_t dwVal = 0x11111111;
@@ -808,7 +815,7 @@ void prerender_sync(void)
    *(RendPos + 3) = dwVal;
    RendPos += 4;
 }
-
+#endif
 
 
 void prerender_sync_half(void)
@@ -820,6 +827,7 @@ void prerender_sync_half(void)
 }
 
 
+#ifndef TARGET_GNW
 static INLINE uint8_t get_sprite_asic(unsigned short offset)
 {
    const int borderWidth = 64 + (asic.extend_border ? 16 : 0);
@@ -849,7 +857,7 @@ static INLINE uint8_t get_sprite_asic(unsigned short offset)
    }
    return 0;
 }
-
+#endif
 
 void prerender_normal(void)
 {
@@ -883,6 +891,7 @@ static INLINE uint32_t shift_scroll_pixel(int value, int byteShift){
  * added asic functions to PreRender
  *  Display sprite in prerender instead of render to be independent of screen resolution
  */
+#ifndef TARGET_GNW
 void prerender_normal_plus(void)
 {
    unsigned int next_address = CRTC.next_address;
@@ -1026,6 +1035,7 @@ void prerender_normal_half_plus(void)
       RendPos++;
    }
 }
+#endif
 
 void prerender_normal_half(void)
 {
@@ -1065,7 +1075,7 @@ void render8bpp(void)
    while (bCount--) {
       *pbPos++ = GateArray.palette[*RendOut++];
    }
-   CPC.scr_pos = (uint32_t *)pbPos;
+   CPC.scr_pos = (unsigned int *)pbPos;
 }
 
 void render8bpp_doubleY(void)
@@ -1078,9 +1088,10 @@ void render8bpp_doubleY(void)
       *(pbPos + dwLineOffs) = val;
       *pbPos++ = val;
    }
-   CPC.scr_pos = (uint32_t *)pbPos;
+   CPC.scr_pos = (unsigned int *)pbPos;
 }
 
+#ifndef TARGET_GNW
 void render16bpp(void)
 {
    register uint16_t *pwPos = (uint16_t *)CPC.scr_pos;
@@ -1088,7 +1099,7 @@ void render16bpp(void)
    while (bCount--) {
       *pwPos++ = GateArray.palette[*RendOut++];
    }
-   CPC.scr_pos = (uint32_t *)pwPos;
+   CPC.scr_pos = (unsigned int *)pwPos;
 }
 
 void render16bpp_doubleY(void)
@@ -1101,9 +1112,8 @@ void render16bpp_doubleY(void)
       *(pwPos + dwLineOffs) = val;
       *pwPos++ = val;
    }
-   CPC.scr_pos = (uint32_t *)pwPos;
+   CPC.scr_pos = (unsigned int *)pwPos;
 }
-
 
 void render32bpp(void)
 {
@@ -1127,6 +1137,7 @@ void render32bpp_doubleY(void)
    }
    CPC.scr_pos = (uint32_t *)pwPos;
 }
+#endif
 
 void crtc_cycle(int repeat_count)
 {
@@ -1430,6 +1441,7 @@ void crtc_init(void)
    }
 #endif
 
+
    if (dwXScale == 1)
    {
       ModeMaps[0] = M0hMap;
@@ -1437,6 +1449,7 @@ void crtc_init(void)
       ModeMaps[2] = M2hMap;
       ModeMaps[3] = M3hMap;
    }
+#ifndef TARGET_GNW
    else
    {
       ModeMaps[0] = M0Map;
@@ -1444,6 +1457,7 @@ void crtc_init(void)
       ModeMaps[2] = M2Map;
       ModeMaps[3] = M3Map;
    }
+#endif
    ModeMap = ModeMaps[0];
 
    for (l = 0; l < 0x7400; l++)

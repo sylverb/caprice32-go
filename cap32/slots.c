@@ -27,9 +27,13 @@
 #include "crtc.h"
 #include "tape.h"
 #include "cart.h"
-#include "z80.h"
+#include "cap32_z80.h"
 #include "errors.h"
+#ifndef TARGET_GNW
 #include "retro_utils.h"
+#else
+#include "save_amstrad.h"
+#endif
 #include "rom/cpm.h"
 
 extern t_CPC CPC;
@@ -41,6 +45,7 @@ extern t_PPI PPI;
 extern t_PSG PSG;
 extern t_drive driveA;
 extern t_drive driveB;
+extern t_track *active_track;
 extern t_z80regs z80;
 extern uint8_t bit_values[8];
 extern uint16_t MaxVSync;
@@ -282,6 +287,95 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
    return 0; // dump ok!
 }
 
+int cap32_save_state() {
+   SaveState *state = amstradSaveStateOpenForWrite("amstrad");
+
+   amstradSaveStateSetBuffer(state, "cpc",  &CPC, sizeof(t_CPC));
+   amstradSaveStateSetBuffer(state, "z80",  &z80, sizeof(t_z80regs));
+   amstradSaveStateSetBuffer(state, "GateArray",  &GateArray, sizeof(t_GateArray));
+   amstradSaveStateSetBuffer(state, "CRTC",  &CRTC, sizeof(t_CRTC));
+   amstradSaveStateSetBuffer(state, "PPI",  &PPI, sizeof(t_PPI));
+   amstradSaveStateSetBuffer(state, "PSG",  &PSG, sizeof(t_PSG));
+   amstradSaveStateSetBuffer(state, "VDU",  &VDU, sizeof(t_VDU));
+   amstradSaveStateSetBuffer(state, "FDC",  &FDC, sizeof(t_FDC));
+   amstradSaveStateSetBuffer(state, "VDU",  pbRAM, 128*1024);
+   amstradSaveStateSet(state, "driveA.current_track", driveA.current_track);
+   amstradSaveStateSet(state, "driveA.current_side", driveA.current_side);
+   amstradSaveStateSet(state, "driveA.current_sector", driveA.current_sector);
+
+   return 0;
+}
+
+int cap32_load_state() {
+   uint8_t val;
+   int n;
+   reg_pair port;
+
+   SaveState* state = amstradSaveStateOpenForRead("amstrad");
+   amstradSaveStateGetBuffer(state, "cpc",  &CPC, sizeof(t_CPC));
+   amstradSaveStateGetBuffer(state, "z80",  &z80, sizeof(t_z80regs));
+   // Gate Array
+   amstradSaveStateGetBuffer(state, "GateArray",  &GateArray, sizeof(t_GateArray));
+   port.b.h = 0x7f;
+   val = GateArray.pen;
+   for (n = 0; n < 17; n++) { // loop for all colours + border
+      GateArray.pen = n;
+      val = GateArray.ink_values[n]; // GA palette entry
+      z80_OUT_handler(port, val | (1 << 6));
+   }
+   GateArray.pen = val;
+   val = GateArray.pen; // GA pen
+   z80_OUT_handler(port, (val & 0x3f));
+   val = GateArray.ROM_config; // GA ROM configuration
+   z80_OUT_handler(port, (val & 0x3f) | (2 << 6));
+   val = GateArray.RAM_config; // GA RAM configuration
+   z80_OUT_handler(port, (val & 0x3f) | (3 << 6));
+
+   // CRTC
+   amstradSaveStateGetBuffer(state, "CRTC",  &CRTC, sizeof(t_CRTC));
+   port.b.h = 0xbd;
+   for (n = 0; n < 18; n++) { // loop for all CRTC registers
+      val = CRTC.registers[n];
+      CRTC.reg_select = n;
+      z80_OUT_handler(port, val);
+   }
+   port.b.h = 0xbc;
+   val = CRTC.reg_select; // CRTC register select
+   z80_OUT_handler(port, val);
+
+   // ROM select
+   port.b.h = 0xdf;
+   val = GateArray.upper_ROM; // upper ROM number
+   z80_OUT_handler(port, val);
+
+   // PPI
+   amstradSaveStateGetBuffer(state, "PPI",  &PPI, sizeof(t_PPI));
+   port.b.h = 0xf4; // port A
+   z80_OUT_handler(port, PPI.portA);
+   port.b.h = 0xf5; // port B
+   z80_OUT_handler(port, PPI.portB);
+   port.b.h = 0xf6; // port C
+   z80_OUT_handler(port, PPI.portC);
+   port.b.h = 0xf7; // control
+   z80_OUT_handler(port, PPI.control);
+
+   amstradSaveStateGetBuffer(state, "PSG",  &PSG, sizeof(t_PSG));
+   amstradSaveStateGetBuffer(state, "VDU",  &VDU, sizeof(t_VDU));
+   amstradSaveStateGetBuffer(state, "FDC",  &FDC, sizeof(t_FDC));
+   amstradSaveStateGetBuffer(state, "VDU",  pbRAM, 128*1024);
+
+   driveA.current_track = amstradSaveStateGet(state, "driveA.current_track");
+   driveA.current_side = amstradSaveStateGet(state, "driveA.current_side");
+   driveA.current_sector = amstradSaveStateGet(state, "driveA.current_sector");
+   driveA.loaded_track = -1;
+   driveA.loaded_side = -1;
+   cap32_check_unit();
+   active_track = &driveA.track;
+   cap32_fdc_load_track(&driveA, driveA.loaded_track, driveA.loaded_side);
+   return 0;
+}
+
+
 /**
  * snapshot_save_mem:
  * @pBuffer: snapshot buffer ready to use, is modified.
@@ -289,6 +383,7 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
  *
  * return 0 when is saved successfully
  */
+#ifndef TARGET_GNW
 int snapshot_save_mem (uint8_t *sna_buffer, uint32_t buffer_size)
 {
    t_SNA_header sh;
@@ -459,10 +554,10 @@ int snapshot_save_mem (uint8_t *sna_buffer, uint32_t buffer_size)
    memcpy(sna_buffer + sizeof(sh), pbRAM, CPC.ram_size*1024);
 
    return 0;
-
 }
+#endif
 
-
+#ifndef TARGET_GNW
 int snapshot_load (char *pchFileName)
 {
    uint32_t size;
@@ -487,8 +582,10 @@ int snapshot_load (char *pchFileName)
 
    return ERR_FILE_NOT_FOUND;
 }
+#endif
 
 
+#ifndef TARGET_GNW
 int snapshot_save (char *pchFileName)
 {
    int error;
@@ -518,6 +615,7 @@ int snapshot_save (char *pchFileName)
 
    return 0;
 }
+#endif
 
 
 /**
@@ -525,9 +623,13 @@ int snapshot_save (char *pchFileName)
  */
 void dsk_eject (t_drive *drive)
 {
+#ifndef TARGET_GNW
    uint32_t track, side;
+#endif
    uint32_t dwTemp;
 
+   drive->raw_data = NULL;
+#ifndef TARGET_GNW
    for (track = 0; track < DSK_TRACKMAX; track++)
    {
       /* loop for all tracks */
@@ -538,13 +640,18 @@ void dsk_eject (t_drive *drive)
             free(drive->track[track][side].data); // release memory allocated for this track
       }
    }
+#endif
 
    dwTemp = drive->current_track; // save the drive head position
    memset(drive, 0, sizeof(t_drive)); // clear drive info structure
    drive->current_track = dwTemp;
+#ifdef TARGET_GNW
+   drive->loaded_track = -1;
+   drive->loaded_side = -1;
+#endif
 }
 
-
+#ifndef TARGET_GNW
 int dsk_load (char *pchFileName, t_drive *drive, char chID)
 {
    int iRetCode;
@@ -697,7 +804,103 @@ exit:
 
    return iRetCode;
 }
+#endif
 
+#ifdef TARGET_GNW
+int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
+{
+   int iRetCode;
+   uint32_t dwTrackSize, track, side, compressedTrackSize;
+   uint8_t *pbPtr, *pbTrackSizeTable;
+
+   iRetCode = 0;
+   dsk_eject(drive);
+   if (buffer != NULL)
+   {
+      drive->raw_data = (unsigned char *)buffer;
+      pbPtr = (uint8_t *)buffer;
+
+      if (memcmp(pbPtr, "MV - CPC", 8) == 0) { // normal DSK image?
+         drive->tracks = *(pbPtr + 0x30); // grab number of tracks
+         if (drive->tracks > DSK_TRACKMAX) { // compare against upper limit
+            drive->tracks = DSK_TRACKMAX; // limit to maximum
+         }
+         drive->sides = *(pbPtr + 0x31); // grab number of sides
+         if (drive->sides > DSK_SIDEMAX) { // abort if more than maximum
+            dsk_eject(drive);
+            return ERR_DSK_SIDES;
+         }
+         dwTrackSize = (*(pbPtr + 0x32) + (*(pbPtr + 0x33) << 8)) - 0x100; // determine track size in bytes, minus track header
+         drive->sides--; // zero base number of sides
+         drive->is_compressed = *(pbPtr + 0x34);
+         pbPtr += 0x100;
+         for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+            for (side = 0; side <= drive->sides; side++) { // loop for all sides
+               if (memcmp(pbPtr, "Track-Info", 10) != 0) { // abort if ID does not match
+                  dsk_eject(drive);
+                  return ERR_DSK_INVALID;
+               }
+               if (drive->is_compressed) {
+                  compressedTrackSize = *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
+                  pbPtr += 0x100 + compressedTrackSize;
+               } else {
+                  pbPtr += 0x100 + dwTrackSize;
+               }
+            }
+         }
+         drive->extended = false; // normal disk - used on loader
+         drive->altered = 0; // disk is as yet unmodified
+         drive->raw_data = (unsigned char *)buffer;
+         drive->loaded_track = -1;
+         drive->loaded_side = -1;
+      } else if (memcmp(pbPtr, "EXTENDED", 8) == 0) { // extended DSK image?
+         drive->tracks = *(pbPtr + 0x30); // number of tracks
+         if (drive->tracks > DSK_TRACKMAX) {  // limit to maximum possible
+            drive->tracks = DSK_TRACKMAX;
+         }
+         drive->random_DEs = *(pbPtr + 0x31) & 0x80; // simulate random Data Errors?
+         drive->sides = *(pbPtr + 0x31) & 3; // number of sides
+         pbTrackSizeTable = pbPtr + 0x34; // pointer to track size table in DSK header
+         drive->sides--; // zero base number of sides
+         drive->is_compressed = *(pbPtr + 0x32);
+         pbPtr += 0x100;
+         for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+            for (side = 0; side <= drive->sides; side++) { // loop for all sides
+               dwTrackSize = (*pbTrackSizeTable++ << 8); // track size in bytes
+               if (dwTrackSize != 0) { // only process if track contains data
+                  dwTrackSize -= 0x100; // compensate for track header
+                  if (memcmp(pbPtr, "Track-Info", 10) != 0) { // valid track header?
+                     dsk_eject(drive);
+                     return ERR_DSK_INVALID;
+                  }
+                  if (drive->is_compressed) {
+                     pbPtr += 0x100 + *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
+                  } else {
+                     pbPtr += 0x100 + dwTrackSize;
+                  }
+               }
+            }
+         }
+         drive->extended = true; // extended disk - used on loader
+         drive->altered = 0; // disk is as yet unmodified
+         drive->raw_data = (unsigned char *)buffer;
+         drive->loaded_track = -1;
+         drive->loaded_side = -1;
+      } else {
+         iRetCode = ERR_DSK_INVALID; // file could not be identified as a valid DSK
+      }
+   }
+   else
+      iRetCode = ERR_FILE_NOT_FOUND;
+
+   if (iRetCode != 0) // on error, 'eject' disk from drive
+      dsk_eject(drive);
+
+   return iRetCode;
+}
+#endif
+
+#ifndef TARGET_GNW
 int dsk_save (char *pchFileName, t_drive *drive, char chID)
 {
    t_DSK_header dh;
@@ -835,12 +1038,12 @@ exit:
       dsk_eject(drive);
    return iRetCode;
 }
-
+#endif
 
 /**
  * TAPE handlers
  */
-
+#ifndef TARGET_GNW
 void tape_eject (void)
 {
    free(pbTapeImage);
@@ -1293,3 +1496,5 @@ int tape_insert_voc (char *pchFileName)
 
    return 0;
 }
+
+#endif

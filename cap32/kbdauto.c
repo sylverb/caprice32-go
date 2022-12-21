@@ -526,6 +526,7 @@ void kbd_buf_clean(){
 }
 
 bool kbd_buf_update() {
+#ifndef TARGET_GNW
    // handle special case for playtape
    if( kbd_feedbuf[kbd_feedbuf_pos]=='^' ) {
       kbd_feedbuf_pos++;
@@ -533,7 +534,9 @@ bool kbd_buf_update() {
       return false;
    }
    // handle wait for x loops
-   else if( kbd_feedbuf[kbd_feedbuf_pos]=='~' ) {
+   else
+#endif
+   if( kbd_feedbuf[kbd_feedbuf_pos]=='~' ) {
       if (wait_loop--)
          return false;
 

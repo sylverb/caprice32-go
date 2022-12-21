@@ -59,7 +59,6 @@
 #endif
 
 extern double colours_rgb[32][3];
-extern uint32_t colours[32];
 
 extern t_GateArray GateArray;
 extern t_CRTC CRTC;

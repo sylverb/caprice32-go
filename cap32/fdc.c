@@ -51,14 +51,18 @@
 */
 
 #include "cap32.h"
-#include "z80.h"
+#include "cap32_z80.h"
+#include "lzma.h"
 
+#ifndef TARGET_GNW
 #include "retro_snd.h"
 #include "retro_ui.h"
+#endif
 
 extern t_CPC CPC;
 extern t_FDC FDC;
 extern t_z80regs z80;
+extern void amstrad_ui_set_led(bool state);
 
 extern uint8_t *pbGPBuffer;
 
@@ -190,7 +194,7 @@ unsigned char* sector_get_read_data(t_sector * sector)
    return &sector->data[sector->weak_read_version * sector->size];
 }
 
-void check_unit(void)
+void cap32_check_unit(void)
 {
    switch (FDC.command[CMD_UNIT] & 1) // check unit selection bits of active command
    {
@@ -737,7 +741,7 @@ uint8_t fdc_read_data(void)
             FDC.byte_count = 0; // clear byte counter
             FDC.phase = CMD_PHASE; // switch to command phase
             FDC.led = 0; // turn the drive LED off
-            retro_ui_set_led(false);
+            amstrad_ui_set_led(false);
          }
          break;
    }
@@ -757,7 +761,7 @@ void fdc_drvstat(void)
 {
    uint8_t val;
 
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    val = FDC.command[CMD_UNIT] & 7; // keep head and unit of command
    if ((active_drive->write_protected) || (active_drive->tracks == 0)) { // write protected, or disk missing?
       val |= 0x48; // set Write Protect + Two Sided (?)
@@ -776,7 +780,9 @@ void fdc_drvstat(void)
 
 void fdc_recalib(void)
 {
+#ifndef TARGET_GNW
    retro_snd_cmd(SND_FDCSEEK, ST_ON);
+#endif
    FDC.command[CMD_C] = 0; // seek to track 0
    fdc_seek();
 }
@@ -826,16 +832,164 @@ void fdc_intstat(void)
    FDC.phase = RESULT_PHASE; // switch to result phase
 }
 
+#ifdef TARGET_GNW
+void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
+{
+   uint32_t dwTrackSize, track, side, sector, dwSectorSize, dwSectors, compressedTrackSize;
+   uint8_t *pbPtr, *pbPtr2, *pbDataPtr, *pbTrackSizeTable;
 
+   compressedTrackSize = 0;
+   if ((drive->loaded_track == load_track) && (drive->loaded_side == load_side)) {
+      // track/side already loaded
+      return;
+   }
+   if (!drive->extended)
+   {
+      pbPtr = drive->raw_data;
+      dwTrackSize = (*(pbPtr + 0x32) + (*(pbPtr + 0x33) << 8)) - 0x100;
+      pbPtr += 0x100;
+      for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+         for (side = 0; side <= drive->sides; side++) { // loop for all sides
+            if (memcmp(pbPtr, "Track-Info", 10) != 0) { // abort if ID does not match
+               return;
+            }
+
+            dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
+            dwSectors = *(pbPtr + 0x15); // grab number of sectors
+            if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
+               dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
+            }
+            drive->track.sectors = dwSectors; // store sector count
+            drive->track.size = dwTrackSize; // store track size
+
+            if (drive->is_compressed) {
+               compressedTrackSize = *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
+               if ((track == load_track) && (side == load_side)) {
+                  lzma_inflate(
+                     (uint8_t *)drive->decompress_buffer,
+                     dwTrackSize, // Track size
+                     (const uint8_t *)pbPtr + 0x100,
+                     compressedTrackSize);
+
+                  drive->track.data = drive->decompress_buffer;
+               }
+            } else {
+               drive->track.data = pbPtr + 0x100;
+            }
+
+            if ((track == load_track) && (side == load_side)) {
+               pbDataPtr = drive->track.data; // pointer to start of memory buffer
+               pbPtr2 = pbPtr;
+               for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+                  memcpy(drive->track.sector[sector].CHRN.data, (pbPtr2 + 0x18), 4); // copy CHRN
+                  memcpy(drive->track.sector[sector].flags, (pbPtr2 + 0x1c), 2); // copy ST1 & ST2
+                  sector_set_sizes(&drive->track.sector[sector], dwSectorSize, dwSectorSize); // weak sectors support
+                  drive->track.sector[sector].data = pbDataPtr; // store pointer to sector data
+                  pbDataPtr += dwSectorSize;
+                  pbPtr2 += 8;
+               }
+            }
+            if (drive->is_compressed) {
+               pbPtr += 0x100 + compressedTrackSize;
+            } else {
+               pbPtr += 0x100 + dwTrackSize;
+            }
+            if ((track == load_track) && (side == load_side)) {
+               drive->loaded_track = track;
+               drive->loaded_side = side;
+               return;
+            }
+         }
+      }
+   } else {
+      // Extended format
+      pbPtr = drive->raw_data;
+      pbTrackSizeTable = pbPtr + 0x34; // pointer to track size table in DSK header
+      pbPtr += 0x100;
+      for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+         for (side = 0; side <= drive->sides; side++) { // loop for all sides
+            dwTrackSize = (*pbTrackSizeTable++ << 8); // track size in bytes
+            if (dwTrackSize != 0) { // only process if track contains data
+               dwTrackSize -= 0x100; // compensate for track header
+               if (memcmp(pbPtr, "Track-Info", 10) != 0) { // valid track header?
+                  return;
+               }
+               dwSectors = *(pbPtr + 0x15); // number of sectors for this track
+               if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
+                  dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
+               }
+               drive->track.sectors = dwSectors; // store sector count
+               drive->track.size = dwTrackSize; // store track size
+               if (drive->is_compressed) {
+                  compressedTrackSize = (*(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8));
+                  if ((track == load_track) && (side == load_side)) {
+                     lzma_inflate(
+                        (uint8_t *)drive->decompress_buffer,
+                        dwTrackSize, // Track size
+                        (const uint8_t *)pbPtr+0x100,
+                        compressedTrackSize);
+                     drive->track.data = drive->decompress_buffer;
+                  }
+               } else {
+                  drive->track.data = pbPtr + 0x100;
+               }
+
+               if ((track == load_track) && (side == load_side)) {
+                  pbDataPtr = drive->track.data; // pointer to start of memory buffer
+                  pbPtr2 = pbPtr;
+                  for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+                     memcpy(drive->track.sector[sector].CHRN.data, (pbPtr2 + 0x18), 4); // copy CHRN
+                     memcpy(drive->track.sector[sector].flags, (pbPtr2 + 0x1c), 2); // copy ST1 & ST2
+                     uint32_t dwRealSize = 0x80 << *(pbPtr2 + 0x1b);
+                     dwSectorSize = *(pbPtr2 + 0x1e) + (*(pbPtr2 + 0x1f) << 8); // sector size in bytes
+                     sector_set_sizes(&drive->track.sector[sector], dwRealSize, dwSectorSize); // weak sectors support
+                     drive->track.sector[sector].data = pbDataPtr; // store pointer to sector data
+                     pbDataPtr += dwSectorSize;
+                     pbPtr2 += 8;
+                  }
+               }
+               if (drive->is_compressed) {
+                  pbPtr += 0x100 + compressedTrackSize;
+               } else {
+                  pbPtr += 0x100 + dwTrackSize;
+               }
+               if ((track == load_track) && (side == load_side)) {
+                  drive->loaded_track = track;
+                  drive->loaded_side = side;
+                  return;
+               }
+            } else {
+               if ((track == load_track) && (side == load_side)) {
+                  memset(&drive->track, 0, sizeof(t_track)); // track not formatted
+                  drive->loaded_track = track;
+                  drive->loaded_side = side;
+                  return;
+               }
+            }
+         }
+      }
+   }
+}
+#endif
 
 void fdc_seek(void)
 {
-   check_unit(); // switch to target drive
+   uint32_t side;
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0) { // drive Ready?
       active_drive->current_track = FDC.command[CMD_C];
       if (active_drive->current_track >= DSK_TRACKMAX) { // beyond valid range?
          active_drive->current_track = DSK_TRACKMAX-1; // limit to maximum
       }
+      side = active_drive->sides ? active_drive->current_side : 0; // single sided drives only acccess side 1
+      if ((active_drive->flipped)) { // did the user request to access the "other" side?
+         side = side ? 0 : 1; // reverse the side to access
+      }
+
+#ifdef TARGET_GNW
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+#endif
+
    }
    FDC.flags |= (FDC.command[CMD_UNIT] & 1) ? SEEKDRVB_flag : SEEKDRVA_flag; // signal completion of seek operation
    FDC.phase = CMD_PHASE; // switch back to command phase (fdc_seek has no result phase!)
@@ -846,14 +1000,19 @@ void fdc_seek(void)
 void fdc_readtrk(void)
 {
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0) { // drive Ready?
       active_drive->current_side = (FDC.command[CMD_UNIT] & 4) >> 2; // extract target side
       uint32_t side = active_drive->sides ? active_drive->current_side : 0; // single sided drives only acccess side 1
       if ((active_drive->flipped)) { // did the user request to access the "other" side?
          side = side ? 0 : 1; // reverse the side to access
       }
+#ifndef TARGET_GNW
       active_track = &active_drive->track[active_drive->current_track][side];
+#else
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+      active_track = &active_drive->track;
+#endif
       if (active_track->sectors != 0) { // track is formatted?
          FDC.command[CMD_R] = 1; // set sector ID to 1
          active_drive->current_sector = 0; // reset sector table index
@@ -880,10 +1039,11 @@ void fdc_readtrk(void)
 
 void fdc_write(void)
 {
-   retro_ui_set_led(true);
+#ifndef TARGET_GNW
+   amstrad_ui_set_led(true);
 
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0) { // drive Ready?
       active_drive->current_side = (FDC.command[CMD_UNIT] & 4) >> 2; // extract target side
       uint32_t side = active_drive->sides ? active_drive->current_side : 0; // single sided drives only acccess side 1
@@ -916,24 +1076,32 @@ void fdc_write(void)
 
       FDC.phase = RESULT_PHASE; // switch to result phase
    }
+#endif
 }
 
 
 
 void fdc_read(void)
 {
+#ifndef TARGET_GNW
    retro_snd_cmd(SND_FDCREAD, ST_ON);
-   retro_ui_set_led(true);
+#endif
+   amstrad_ui_set_led(true);
 
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0) { // drive Ready?
       active_drive->current_side = (FDC.command[CMD_UNIT] & 4) >> 2; // extract target side
       uint32_t side = active_drive->sides ? active_drive->current_side : 0; // single sided drives only acccess side 1
       if ((active_drive->flipped)) { // did the user request to access the "other" side?
          side = side ? 0 : 1; // reverse the side to access
       }
+#ifndef TARGET_GNW
       active_track = &active_drive->track[active_drive->current_track][side];
+#else
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+      active_track = &active_drive->track;
+#endif
       if (active_track->sectors != 0) { // track is formatted?
          cmd_read();
       }
@@ -958,14 +1126,19 @@ void fdc_read(void)
 void fdc_readID(void)
 {
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0) { // drive Ready?
       active_drive->current_side = (FDC.command[CMD_UNIT] & 4) >> 2; // extract target side
       uint32_t side = active_drive->sides ? active_drive->current_side : 0; // single sided drives only acccess side 1
       if ((active_drive->flipped)) { // did the user request to access the "other" side?
          side = side ? 0 : 1; // reverse the side to access
       }
+#ifndef TARGET_GNW
       active_track = &active_drive->track[active_drive->current_track][side];
+#else
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+      active_track = &active_drive->track;
+#endif
       if (active_track->sectors != 0) { // track is formatted?
          uint32_t idx;
 
@@ -991,7 +1164,7 @@ void fdc_readID(void)
 void fdc_writeID(void)
 {
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0)
    { // drive Ready?
       active_drive->current_side = (FDC.command[CMD_UNIT] & 4) >> 2; // extract target side
@@ -1000,7 +1173,12 @@ void fdc_writeID(void)
       { // did the user request to access the "other" side?
          side = side ? 0 : 1; // reverse the side to access
       }
+#ifndef TARGET_GNW
       active_track = &active_drive->track[active_drive->current_track][side];
+#else
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+      active_track = &active_drive->track;
+#endif
       if (active_drive->write_protected)
       { // is write protect tab set?
          FDC.result[RES_ST0] |= 0x40; // AT
@@ -1029,10 +1207,10 @@ void fdc_writeID(void)
 
 void fdc_scan(void)
 {
-   retro_ui_set_led(true);
+   amstrad_ui_set_led(true);
 
    FDC.led = 1; // turn the drive LED on
-   check_unit(); // switch to target drive
+   cap32_check_unit(); // switch to target drive
    if (init_status_regs() == 0)
    {
       // drive Ready?
@@ -1044,8 +1222,12 @@ void fdc_scan(void)
          side = side ? 0 : 1; // reverse the side to access
       }
 
+#ifndef TARGET_GNW
       active_track = &active_drive->track[active_drive->current_track][side];
-
+#else
+      cap32_fdc_load_track(active_drive,active_drive->current_track,side);
+      active_track = &active_drive->track;
+#endif
       if (active_track->sectors != 0)
       { // track is formatted?
          if (FDC.command[CMD_STP] > 2) {

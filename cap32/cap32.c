@@ -163,33 +163,44 @@
 */
 
 /* forward declarations - some libretro port callbacks */
-void retro_loop(void);
 void doCleanUp (void);
 int theloop(void);
-int capmain (int argc, char **argv);
 void retro_audio_mix_batch (void);
 int HandleExtension(char *path,char *ext);
 
+#ifndef TARGET_GNW
 #include "libretro-core.h"
 #include "retro_snd.h"
 #include "retro_ui.h"
 #include "retro_utils.h"
 #include "libretro/gfx/video.h"
+#endif
 
 extern void kbd_update_table(int lang);
 
+#ifndef TARGET_GNW
 extern char DISKA_NAME[512];
 extern char DISKB_NAME[512];
 extern char cart_name[512];
+#else
+extern char DISKA_NAME[16];
+extern char DISKB_NAME[16];
+extern char cart_name[16];
+#endif
 
 #include "cap32.h"
 #include "crtc.h"
 #include "tape.h"
 #include "cart.h"
-#include "z80.h"
-#include "asic.h"
+#include "cap32_z80.h"
+//#include "asic.h"
 #include "slots.h"
 #include "errors.h"
+
+#ifdef TARGET_GNW
+#include "main_amstrad.h"
+#include "gw_malloc.h"
+#endif
 
 #define MSG_SNA_LOAD             32
 #define MSG_SNA_SAVE             33
@@ -211,7 +222,11 @@ extern char cart_name[512];
 #define MAX_SPEED_SETTING 32
 #define DEF_SPEED_SETTING 4
 
+#ifndef TARGET_GNW
 extern uint8_t bTapeLevel;
+#else
+uint8_t bTapeLevel = 0;
+#endif
 extern t_z80regs z80;
 
 extern uint32_t *ScanPos;
@@ -223,11 +238,12 @@ extern t_new_dt new_dt;
 //video_plugin* vid_plugin;
 uint32_t dwSndMinSafeDist=0, dwSndMaxSafeDist=2*2*882;
 
-uint32_t dwTicks, dwTicksOffset;
 uint32_t dwXScale, dwYScale;
 
-uint32_t dwBreakPoint, dwTrace, dwMF2ExitAddr;
-uint32_t dwMF2Flags = 0;
+uint32_t dwBreakPoint, dwTrace;
+#ifndef TARGET_GNW
+uint32_t dwMF2ExitAddr, dwMF2Flags = 0;
+#endif
 uint8_t *pbGPBuffer = NULL;
 uint8_t *pbSndBuffer = NULL;
 uint8_t *pbSndBufferEnd = NULL;
@@ -238,11 +254,20 @@ uint8_t *pbROM = NULL;
 uint8_t *pbROMlo = NULL;
 uint8_t *pbROMhi = NULL;
 uint8_t *pbExpansionROM = NULL;
+#ifndef TARGET_GNW
 uint8_t *pbMF2ROMbackup = NULL;
 uint8_t *pbMF2ROM = NULL;
+#endif
 uint8_t keyboard_matrix[16];
 
 uint8_t *membank_config[8][4];
+
+#ifdef TARGET_GNW
+static uint8_t GPBuffer[16*1024]; // general purpose buffer
+static uint8_t RAM[CPC_MAX_RAM * 1024]; // RAM
+static uint8_t ROM[32 * 1024];
+//static uint8_t RegisterPage[16 * 1024];
+#endif
 
 FILE *pfileObject;
 FILE *pfoPrinter;
@@ -286,7 +311,7 @@ double colours_green[32] = {
    0.2510, 0.3137, 0.5333, 0.5961
 };
 
-uint32_t colours[32];
+uint32_t amstrad_colours[32];
 
 static uint8_t bit_values[8] = {
    0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80
@@ -305,8 +330,10 @@ typedef enum {
    CAP32_LOADDRVB,
    CAP32_LOADSNAP,
    CAP32_LOADTAPE,
+#ifndef TARGET_GNW
    CAP32_MF2RESET,
    CAP32_MF2STOP,
+#endif
    CAP32_OPTIONS,
    CAP32_PAUSE,
    CAP32_RESET,
@@ -328,23 +355,24 @@ typedef enum {
 
 #define KBD_MAX_ENTRIES 160
 
+#ifndef TARGET_GNW
 #include "libretro.h"
+#endif
 
 #define MAX_ROM_MODS 2
 #include "rom/rom_mods.h"
 
+#ifndef TARGET_GNW
 #include "rom/464.h"
 #include "rom/6128.h"
 #include "rom/6128p.h"
 #include "rom/amsdos.h"
+#else
+#include "rom/6128.h"
+#include "rom/amsdos.h"
+#endif
 
 char chAppPath[_MAX_PATH + 1];
-char chROMSelected[_MAX_PATH + 1];
-char chROMFile[3][14] = {
-   "cpc464.rom",
-   "cpc664.rom",
-   "cpc6128.rom"
-};
 
 t_CPC CPC;
 t_CRTC CRTC;
@@ -460,17 +488,22 @@ void ga_memory_manager (void)
       membank_write[n] = membank_config[GateArray.RAM_config & 7][n];
    }
    if (!(GateArray.ROM_config & 0x04)) { // lower ROM is enabled?
+#ifndef TARGET_GNW
       if (dwMF2Flags & MF2_ACTIVE) { // is the Multiface 2 paged in?
          membank_read[GateArray.lower_ROM_bank] = pbMF2ROM;
          membank_write[GateArray.lower_ROM_bank] = pbMF2ROM;
-      } else {
+      } else
+#endif
+      {
          membank_read[GateArray.lower_ROM_bank] = pbROMlo; // 'page in' lower ROM
       }
    }
+#ifndef TARGET_GNW
    if (CPC.model > CPC_MODEL_6128 && GateArray.registerPageOn) {
       membank_read[1] = pbRegisterPage;
       membank_write[1] = pbRegisterPage;
    }
+#endif
    if (!(GateArray.ROM_config & 0x08)) { // upper/expansion ROM is enabled?
       membank_read[3] = pbExpansionROM; // 'page in' upper/expansion ROM
    }
@@ -526,7 +559,11 @@ uint8_t z80_IN_handler (reg_pair port)
             // 6128+: always use port B as input as this fixes Tintin on the moon.
             // This should always be the case anyway but do not activate it for other model for now, let's validate it before.
             // TODO: verify with CPC (non-plus) if we go in the else in some cases
+#ifndef TARGET_GNW
             if (CPC.model > CPC_MODEL_6128 || PPI.control & 2) { // port B set to input?
+#else
+            if (PPI.control & 2) { // port B set to input?
+#endif
                ret_val = bTapeLevel | // tape level when reading
                          (CPC.printer ? 0 : 0x40) | // ready line of connected printer
                          (CPC.jumpers & 0x7f) | // manufacturer + 50Hz
@@ -590,9 +627,11 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
             }
             #endif
             GateArray.pen = val & 0x10 ? 0x10 : val & 0x0f; // if bit 5 is set, pen indexes the border colour
+#ifndef TARGET_GNW
             if (CPC.mf2) { // MF2 enabled?
                *(pbMF2ROM + 0x03fcf) = val;
             }
+#endif
             break;
          case 1: // set colour
             #ifdef DEBUG_GA
@@ -603,18 +642,21 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
             {
                uint8_t colour = val & 0x1f; // isolate colour value
                GateArray.ink_values[GateArray.pen] = colour;
-               GateArray.palette[GateArray.pen] =colours[colour];
+               GateArray.palette[GateArray.pen] =amstrad_colours[colour];
                // mode 2 - 'anti-aliasing' colour
                if (GateArray.pen < 2) {
                   CPC.video_set_palette_antialias();
                }
             }
+#ifndef TARGET_GNW
             if (CPC.mf2) { // MF2 enabled?
                int iPen = *(pbMF2ROM + 0x03fcf);
                *(pbMF2ROM + (0x03f90 | ((iPen & 0x10) << 2) | (iPen & 0x0f))) = val;
             }
+#endif
             break;
          case 2: // set mode
+#ifndef TARGET_GNW
             if (!asic.locked && (val & 0x20)) {
                asic.rmr2 = val; // 6128+ RMR2 register
                int membank = (val >> 3) & 3;
@@ -629,7 +671,9 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
                GateArray.lower_ROM_bank = membank;
                pbROMlo = pbCartridgePages[(val & 0x7)];
                ga_memory_manager();
-            } else {
+            } else
+#endif
+            {
                #ifdef DEBUG_GA
                if (dwDebugFlag) {
                   fprintf(pfoDebug, "rom 0x%02x\r\n", val);
@@ -642,9 +686,11 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
                   z80.int_pending = 0; // clear pending interrupts
                   GateArray.sl_count = 0; // reset GA scanline counter
                }
+#ifndef TARGET_GNW
                if (CPC.mf2) { // MF2 enabled?
                   *(pbMF2ROM + 0x03fef) = val;
                }
+#endif
             }
             break;
          // gate array do not set the memory configuration 
@@ -664,9 +710,11 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
       #endif
       GateArray.RAM_config = val;
       ga_memory_manager();
+#ifndef TARGET_GNW
       if (CPC.mf2) { // MF2 enabled?
          *(pbMF2ROM + 0x03fff) = val;
       }
+#endif
    }
 
    /* CRTC */
@@ -674,13 +722,17 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
       uint8_t crtc_port = port.b.h & 3;
       if (crtc_port == 0) { // CRTC register select?
          // 6128+: this is where we should detect the ASIC (un)locking sequence
+#ifndef TARGET_GNW
          if (CPC.model > CPC_MODEL_6128) {
             asic_poke_lock_sequence(val);
          }
+#endif
          CRTC.reg_select = val;
+#ifndef TARGET_GNW
          if (CPC.mf2) { // MF2 enabled?
             *(pbMF2ROM + 0x03cff) = val;
          }
+#endif
       }
       else if (crtc_port == 1) { // CRTC write data?
          if (CRTC.reg_select < 16) { // only registers 0 - 15 can be written to
@@ -808,9 +860,11 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
                   break;
             }
          }
+#ifndef TARGET_GNW
          if (CPC.mf2) { // MF2 enabled?
             *(pbMF2ROM + (0x03db0 | (*(pbMF2ROM + 0x03cff) & 0x0f))) = val;
          }
+#endif
          #ifdef DEBUG_CRTC
          if (dwDebugFlag) {
             fprintf(pfoDebug, "%02x = %02x\r\n", CRTC.reg_select, val);
@@ -825,13 +879,16 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
    if (!(port.b.h & 0x20))
    {
       /* ROM select? */
+#ifndef TARGET_GNW
       if (CPC.model <= CPC_MODEL_6128) {
+#endif
          GateArray.upper_ROM = val;
          pbExpansionROM = memmap_ROM[val];
 
          /* selected expansion ROM not present? */
          if (pbExpansionROM == NULL)
             pbExpansionROM = pbROMhi; /* revert to BASIC ROM */
+#ifndef TARGET_GNW
       } else {
          //printf("ROM select: %u\n", (int) val);
          if (val == 7) {
@@ -847,16 +904,20 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
          //printf("ROM-PAGE select: %u\n", (int) page);
          //printf("ROM-PAGE val: %u\n", (int) pbExpansionROM[0]);
       }
+#endif
       /* upper/expansion ROM is enabled? */
       if (!(GateArray.ROM_config & 0x08))
          membank_read[3] = pbExpansionROM; /* 'page in' upper/expansion ROM */
 
+#ifndef TARGET_GNW
       /* MF2 enabled? */
       if (CPC.mf2)
          *(pbMF2ROM + 0x03aac) = val;
+#endif
    }
 
    /* printer port */
+#ifndef TARGET_GNW
    if (!(port.b.h & 0x10))
    { // printer port?
       CPC.printer_port = val ^ 0x80; // invert bit 7
@@ -867,6 +928,7 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
             fputc(CPC.printer_port, pfoPrinter); // capture printer output to file
       }
    }
+#endif
 
    /* PPI */
    if (!(port.b.h & 0x08))
@@ -930,8 +992,10 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
                }
             }
 
+#ifndef TARGET_GNW
             if (CPC.mf2) // MF2 enabled?
                *(pbMF2ROM + 0x037ff) = val;
+#endif
             break;
       }
    }
@@ -939,12 +1003,14 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
    if ((port.b.h == 0xfa) && (!(port.b.l & 0x80))) { // floppy motor control?
       //printf("FDC motor control access: %u - %u\n",  (int) port.b.l, (int) val);
       FDC.motor = val & 0x01;
+#ifndef TARGET_GNW
       if(FDC.motor) {
          retro_snd_cmd(SND_FDCMOTOR, ST_LOOP);
          retro_show_statusbar();
       } else {
          retro_snd_cmd(SND_FDCMOTOR, ST_OFF);
       }
+#endif
       #ifdef DEBUG_FDC
       fputs(FDC.motor ? "\r\n--- motor on" : "\r\n--- motor off", pfoDebug);
       #endif
@@ -953,6 +1019,7 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
    else if ((port.b.h == 0xfb) && (!(port.b.l & 0x80))) { // FDC data register?
       fdc_write_data(val);
    }
+#ifndef TARGET_GNW
    else if ((CPC.mf2) && (port.b.h == 0xfe)) { // Multiface 2?
       if ((port.b.l == 0xe8) && (!(dwMF2Flags & MF2_INVISIBLE))) { // page in MF2 ROM?
          dwMF2Flags |= MF2_ACTIVE;
@@ -963,8 +1030,10 @@ void z80_OUT_handler (reg_pair port, uint8_t val)
          ga_memory_manager();
       }
    }
+#endif
 }
 
+#ifndef TARGET_GNW
 int zip_dir (t_zip_info *zi)
 {
    int n, iFileCount;
@@ -1048,6 +1117,7 @@ int zip_dir (t_zip_info *zi)
    zi->iFiles = iFileCount;
    return 0; // operation completed successfully
 }
+#endif
 
 int emulator_select_ROM (void)
 {
@@ -1056,6 +1126,7 @@ int emulator_select_ROM (void)
    // TODO load custom bios
    switch(CPC.model)
    {
+#ifndef TARGET_GNW
       case CPC_MODEL_464:
          memcpy(pbROM, OS_BASIC10, (32*1024)); // CPC 464
          break;
@@ -1063,10 +1134,12 @@ int emulator_select_ROM (void)
          memcpy(pbROM, OS_BASIC10, (32*1024)); // CPC 464 and 664
          memmap_ROM[7] = (uint8_t*)&AMSDOS[0];
          break;
+#endif
       case CPC_MODEL_6128:
          memcpy(pbROM, OS_BASIC11, (32*1024));
          memmap_ROM[7] = (uint8_t*)&AMSDOS[0];
          break;
+#ifndef TARGET_GNW
       case CPC_MODEL_PLUS:
          if(cart_name[0] == '\0') {
             cpr_load(&OS_6128P[0]);
@@ -1077,6 +1150,7 @@ int emulator_select_ROM (void)
             LOGI("loaded cart: %s\n", cart_name);
          }
          break;
+#endif
    }
 
    if (CPC.keyboard)
@@ -1091,10 +1165,12 @@ int emulator_select_ROM (void)
          case CPC_MODEL_6128:
             pbPtr += 0x1eef; // location of the keyboard translation table
             break;
+#ifndef TARGET_GNW
          case CPC_MODEL_PLUS:
             if(cart_name[0] == '\0')
                pbPtr += 0x1eef; // Only patch system cartridge
             break;
+#endif
       }
 
       if (pbPtr != pbROMlo)
@@ -1111,12 +1187,14 @@ int emulator_select_ROM (void)
 void emulator_reset (bool bolMF2Reset)
 {
    int n;
+#ifndef TARGET_GNW
    if(CPC.model > CPC_MODEL_6128){
       if (pbCartridgePages[0] != NULL)
          pbROMlo = pbCartridgePages[0];
    }
 
    asic_reset();
+#endif
    // FIXME - generate plus palette correctly
    video_set_palette();
 
@@ -1126,7 +1204,9 @@ void emulator_reset (bool bolMF2Reset)
    _IX = _IY = 0xffff; // IX and IY are FFFF after a reset!
    _F = Zflag; // set zero flag
 
+#ifdef TARGET_GNW
    z80.break_point = 0xffffffff; // clear break point
+#endif
 
    // CPC
    CPC.cycle_count      = CYCLE_COUNT_INIT;
@@ -1142,7 +1222,9 @@ void emulator_reset (bool bolMF2Reset)
    // CRTC
    crtc_reset();
 
+#ifndef TARGET_GNW
    asic.locked = true;
+#endif
 
    // Gate Array
    memset(&GateArray, 0, sizeof(GateArray)); // clear GA data structure
@@ -1164,13 +1246,17 @@ void emulator_reset (bool bolMF2Reset)
    FDC.flags = STATUSDRVA_flag | STATUSDRVB_flag;
 
    // memory
+#ifndef TARGET_GNW
    if (bolMF2Reset)
       memset(pbRAM, 0, 64*1024); // clear only the first 64K of CPC memory
    else
+#endif
    {
       memset(pbRAM, 0, CPC.ram_size*1024); // clear all memory used for CPC RAM
+#ifndef TARGET_GNW
       if (pbMF2ROM)
          memset(pbMF2ROM+8192, 0, 8192); // clear the MF2's RAM area
+#endif
    }
 
    for (n = 0; n < 4; n++)
@@ -1183,13 +1269,15 @@ void emulator_reset (bool bolMF2Reset)
    membank_read[3] = pbROMhi; // 'page in' upper ROM
 
    // Multiface 2
+#ifndef TARGET_GNW
    dwMF2Flags = 0;
    dwMF2ExitAddr = 0xffffffff; // clear MF2 return address
    if ((pbMF2ROM) && (pbMF2ROMbackup))
       memcpy(pbMF2ROM, pbMF2ROMbackup, 8192); // copy the MF2 ROM to its proper place
+#endif
 }
 
-int emulator_init (void)
+int caprice_emulator_init (void)
 {
    int iErr, iRomNum;
    char chPath[_MAX_PATH + 1];
@@ -1200,12 +1288,19 @@ int emulator_init (void)
    (void)iRomNum;
    (void)iErr;
 
+#ifndef TARGET_GNW
    pbGPBuffer     = (uint8_t*) malloc(128 * 1024 * sizeof(uint8_t)); // attempt to allocate the general purpose buffer
    pbRAM          = (uint8_t*) retro_malloc(CPC_MAX_RAM * 1024 * sizeof(uint8_t)); // allocate memory for desired amount of RAM
    pbROM          = (uint8_t*) retro_malloc(32 * 1024 * sizeof(uint8_t));
    pbRegisterPage = (uint8_t*) malloc(16 * 1024 * sizeof(uint8_t));
+#else
+   pbGPBuffer     = GPBuffer;
+   pbRAM          = RAM;
+   pbROM          = ROM;
+//   pbRegisterPage = RegisterPage;
+#endif
 
-   if (!pbGPBuffer || !pbRAM || !pbROM || !pbRegisterPage)
+   if (!pbGPBuffer || !pbRAM || !pbROM/* || !pbRegisterPage*/)
       return ERR_OUT_OF_MEMORY;
 
    pbROMlo = pbROM;
@@ -1216,7 +1311,9 @@ int emulator_init (void)
 
    emulator_select_ROM();
 
+#ifndef TARGET_GNW
    CPC.mf2 = 0;
+#endif
    crtc_init();
 
    emulator_reset(false);
@@ -1230,15 +1327,19 @@ void emulator_shutdown (void)
 
    int iRomNum;
 
+#ifndef TARGET_GNW
    if(pbRegisterPage)
       free(pbRegisterPage);
    pbRegisterPage = NULL;
+#endif
 
+#ifndef TARGET_GNW
    if (pbMF2ROMbackup)
       free(pbMF2ROMbackup);
    if (pbMF2ROM)
       free(pbMF2ROM);
    pbMF2ROM = NULL;
+#endif
 
    for (iRomNum = 2; iRomNum < 16; iRomNum++) // loop for ROMs 2-15
    {
@@ -1247,18 +1348,21 @@ void emulator_shutdown (void)
    }
 
    pbROMlo = pbROMhi = pbExpansionROM = NULL;
+#ifndef TARGET_GNW
    if (pbROM)
       retro_free(pbROM);
    if (pbRAM)
       retro_free(pbRAM);
    if (pbGPBuffer)
       free(pbGPBuffer);
+#endif
 
    pbROM = NULL;
    pbRAM = NULL;
    pbGPBuffer = NULL;
 }
 
+#ifndef TARGET_GNW
 int cart_start (char *pchFileName) {
 
    if(retro_computer_cfg.model != 3) {
@@ -1278,11 +1382,12 @@ int cart_start (char *pchFileName) {
    /* Restart emulator if initiated */
    if(emu_status & COMPUTER_READY) {
       emulator_shutdown();
-      emulator_init();
+      caprice_emulator_init();
    }
 
    return 0;
 }
+#endif
 
 int printer_start (void)
 {
@@ -1311,6 +1416,20 @@ int audio_align_samples (int given)
    return actual; // return the closest match as 2^n
 }
 
+void amstrad_set_volume(uint8_t volume) {
+   CPC.snd_volume = volume;
+   Calculate_Level_Tables();
+}
+
+void amstrad_set_audio_buffer(int8_t *buffer, uint32_t size) {
+   pbSndBuffer        = (uint8_t *)buffer;
+   CPC.snd_buffersize = size;
+   
+   pbSndBufferEnd     = pbSndBuffer + CPC.snd_buffersize;
+   memset(pbSndBuffer, 0, CPC.snd_buffersize);
+   CPC.snd_bufferptr  = pbSndBuffer; // init write cursor
+}
+
 int audio_init (void)
 {
    unsigned n;
@@ -1318,14 +1437,18 @@ int audio_init (void)
    if (!CPC.snd_enabled)
       return 0;
 
+#ifndef TARGET_GNW
    CPC.snd_buffersize = retro_getAudioBuffer();
    pbSndBuffer        = (uint8_t*) retro_malloc(CPC.snd_buffersize); // allocate the sound data buffer
    if(!pbSndBuffer)
       return ERR_OUT_OF_MEMORY;
-
    pbSndBufferEnd     = pbSndBuffer + CPC.snd_buffersize;
    memset(pbSndBuffer, 0, CPC.snd_buffersize);
    CPC.snd_bufferptr  = pbSndBuffer; // init write cursor
+#else
+//   CPC.snd_buffersize = 32*1024;
+//   pbSndBuffer        = SoundBuffer;
+#endif
 
    InitAY();
 
@@ -1337,14 +1460,14 @@ int audio_init (void)
 
 void audio_shutdown (void)
 {
+#ifndef TARGET_GNW
    if(pbSndBuffer)
       retro_free(pbSndBuffer);
+#endif
    CPC.snd_bufferptr = NULL;
    pbSndBuffer = NULL;
 
 }
-void audio_pause (void) {}
-void audio_resume (void) {}
 
 unsigned int video_monitor_colour (double r, double g, double b)
 {
@@ -1402,6 +1525,11 @@ unsigned int video_monitor_grey(double r, double g, double b) {
    return CPC.rgb2color(grey, grey, grey);
 }
 
+void cap32_set_palette(int palette) {
+   CPC.scr_tube = palette;
+   video_set_palette();
+}
+
 void video_update_tube() {
    switch(CPC.scr_tube) {
       case CPC_MONITOR_COLOR:
@@ -1418,13 +1546,12 @@ void video_update_tube() {
 
 int video_set_palette (void)
 {
-
    int n;
    video_update_tube();
 
    for (n = 0; n < 32; n++)
    {
-      colours[n] = CPC.video_monitor(colours_rgb[n][0], colours_rgb[n][1], colours_rgb[n][2]);
+      amstrad_colours[n] = CPC.video_monitor(colours_rgb[n][0], colours_rgb[n][1], colours_rgb[n][2]);
    }
 
    for (n = 0; n < 17; n++)
@@ -1432,7 +1559,7 @@ int video_set_palette (void)
       /* loop for all colours + border */
       int i = GateArray.ink_values[n];
       (void)i;
-      GateArray.palette[n] = colours[GateArray.ink_values[n]];
+      GateArray.palette[n] = amstrad_colours[GateArray.ink_values[n]];
    }
 
    return 0;
@@ -1440,6 +1567,7 @@ int video_set_palette (void)
 
 void video_set_style (void)
 {
+#ifndef TARGET_GNW
    if (CPC.scr_style == 3) //384x272
    {
       dwXScale = 1;
@@ -1450,8 +1578,13 @@ void video_set_style (void)
       dwXScale = 2;
       dwYScale = 1;
    }
+#else
+   dwXScale = 1;
+   dwYScale = 1;
+#endif
    //printf("model:%u, style: %u, dwScale: %ux%u, offset: %u\n", CPC.model, CPC.scr_style, dwXScale, dwYScale, CPC.scr_line_offs);
 
+#ifndef TARGET_GNW
    switch (dwXScale)
    {
       case 1:
@@ -1473,7 +1606,13 @@ void video_set_style (void)
          CPC.scr_prerendersync = (void(*)(void))prerender_sync;
          break;
    }
+#else
+   CPC.scr_prerendernorm = (void(*)(void))prerender_normal_half;
+   CPC.scr_prerenderbord = (void(*)(void))prerender_border_half;
+   CPC.scr_prerendersync = (void(*)(void))prerender_sync_half;
+#endif
 
+#ifndef TARGET_GNW
    switch(CPC.scr_bpp)
    {
       case 32:
@@ -1497,25 +1636,39 @@ void video_set_style (void)
             CPC.scr_render = (void(*)(void))render16bpp;
          break;
    }
-
+#else
+   CPC.video_set_palette_antialias = (void(*)(void)) video_set_palette_antialias_8bpp;
+   CPC.rgb2color = rgb2color_8bpp;
+   CPC.scr_render = (void(*)(void))render8bpp;
+#endif
 }
 
 int video_init (void)
 {
    int error_code;
 
+#ifndef TARGET_GNW
    CPC.scr_bpp = retro_getGfxBpp();
    CPC.scr_style     = retro_getStyle();
    CPC.scr_bps       = retro_getGfxBps();
    CPC.scr_pos       = CPC.scr_base = retro_getScreenPtr();
+#else
+   CPC.scr_bpp       = 8;
+   CPC.scr_bps       = CPC_SCREEN_WIDTH;
+   CPC.scr_pos       = CPC.scr_base = amstrad_getScreenPtr();
+#endif
 
    video_set_style();
    error_code = video_set_palette(); // init CPC colours and hardware palette (in 8bpp mode)
    if (error_code)
       return error_code;
 
+#ifndef TARGET_GNW
    CPC.scr_line_offs = ((CPC.scr_bps * (dwYScale)) // because is double height
                      / (2 / retro_video.bytes) ) ;
+#else
+   CPC.scr_line_offs = CPC.scr_bps / 4;
+#endif
 
    return 0;
 }
@@ -1591,6 +1744,40 @@ void getConfigValueString (char* pchFileName, char* pchSection,
 
 void loadConfiguration (void)
 {
+#ifdef TARGET_GNW
+   printf("loadConfiguration\n");
+   memset(&CPC, 0, sizeof(CPC));
+   CPC.model = CPC_MODEL_6128;
+   CPC.ram_size = 128;
+   CPC.jumpers = 0x1e;
+   CPC.printer = 0;
+   CPC.keyboard = 0;
+   kbd_update_table(0);
+   CPC.joysticks = 0;
+   CPC.scr_fs_width  = 384;
+   CPC.scr_fs_height = 288;
+   CPC.scr_oglfilter = 0;
+   CPC.scr_vsync     = 1;
+   CPC.scr_led       = 0;
+   CPC.scr_fps       = 0;
+   CPC.scr_tube      = CPC_MONITOR_COLOR;
+   CPC.scr_intensity = 10;
+   CPC.scr_remanency = 0;
+
+   CPC.scr_window = 0;
+
+   CPC.snd_enabled = 1;
+   CPC.snd_playback_rate = 1; // 22.05kHz // 48kHz (freq_table)
+   CPC.snd_bits = 16;
+   CPC.snd_stereo = 0;
+   CPC.snd_volume = 0; // Silent to prevent high volume at state load
+
+   CPC.snd_pp_device = 0;
+
+   CPC.kbd_layout = 0;
+
+   CPC.max_tracksize = 6144-154;
+#else
    unsigned i, n, iSide, iSector, iRomNum;
    char chFileName[_MAX_PATH + 11];
    char chPath[_MAX_PATH + 16];
@@ -1620,8 +1807,6 @@ void loadConfiguration (void)
 
    if ((CPC.speed < MIN_SPEED_SETTING) || (CPC.speed > MAX_SPEED_SETTING))
       CPC.speed = DEF_SPEED_SETTING;
-   CPC.limit_speed   = 1;
-   CPC.auto_pause    = getConfigValueInt(chFileName, "system", "auto_pause", 1) & 1;
    CPC.printer       = getConfigValueInt(chFileName, "system", "printer", 0) & 1;
    CPC.mf2           = getConfigValueInt(chFileName, "system", "mf2", 0) & 1;
    //CPC.keyboard      = getConfigValueInt(chFileName, "system", "keyboard", 0);
@@ -1812,8 +1997,10 @@ void loadConfiguration (void)
    else
       fclose(pfileObject);
    getConfigValueString(chFileName, "rom", "rom_mf2", CPC.rom_mf2, sizeof(CPC.rom_mf2)-1, "");
+#endif
 }
 
+#ifndef TARGET_GNW
 void splitPathFileName(char *pchCombined, char *pchPath, char *pchFile)
 {
    char *pchPtr;
@@ -1851,6 +2038,7 @@ void splitPathFileName(char *pchCombined, char *pchPath, char *pchFile)
       }
    }
 }
+#endif
 
 void doCleanUp (void)
 {
@@ -1874,7 +2062,7 @@ void doCleanUp (void)
 
 }
 
-void emu_reset(void)
+void cap32_emu_reset(void)
 {
    emulator_reset(false);
 }
@@ -1882,9 +2070,11 @@ void emu_reset(void)
 void emu_reconfigure(void)
 {
    emulator_shutdown();
-   emulator_init();
+   caprice_emulator_init();
 
+#ifndef TARGET_GNW
    retro_computer_cfg.is_dirty = false;
+#endif
 }
 
 void change_model(int val){
@@ -1895,7 +2085,9 @@ void change_model(int val){
    if ((CPC.model >= 2) && (CPC.ram_size < 128))
       CPC.ram_size   = 128;
 
+#ifndef TARGET_GNW
    retro_computer_cfg.is_dirty = true;
+#endif
 }
 
 void change_ram(int val){
@@ -1908,7 +2100,9 @@ void change_ram(int val){
    if ((CPC.model >= 2) && (CPC.ram_size < 128))
       CPC.ram_size = 128;
 
+#ifndef TARGET_GNW
    retro_computer_cfg.is_dirty = true;
+#endif
 }
 
 uint8_t* get_ram_ptr() {
@@ -1922,7 +2116,9 @@ size_t get_ram_size(void) {
 void change_lang(int val){
    CPC.keyboard=val;
    kbd_update_table(val);
+#ifndef TARGET_GNW
    retro_computer_cfg.is_dirty = true;
+#endif
 }
 
 void mixsnd(void)
@@ -1973,6 +2169,24 @@ int attach_disk(char *arv, int drive)
    return result;
 }
 
+int attach_disk_buffer(char *buffer, int drive)
+{
+   int result = 1;
+
+   if(!drive) {
+      if((result = dsk_load_buffer(buffer, &driveA, 'A')) == 0)
+      {
+//         sprintf(DISKA_NAME,"%s",arv);
+      }
+   } else {
+      if((result = dsk_load_buffer(buffer, &driveB, 'B')) == 0)
+      {
+//         sprintf(DISKB_NAME,"%s",arv);
+      }
+   }
+   return result;
+}
+
 int detach_disk(int drive)
 {
    if(!drive)
@@ -1989,21 +2203,27 @@ int detach_disk(int drive)
    return 0;
 }
 
-void retro_loop(void)
+void caprice_retro_loop(void)
 {
    static int iExitCondition = EC_FRAME_COMPLETE;
 
    do
    {
       uint32_t dwOffset = CPC.scr_pos - CPC.scr_base; // offset in current surface row
+#ifndef TARGET_GNW
       if (VDU.scrln > 0)
          CPC.scr_base = retro_getScreenPtr() + (VDU.scrln * CPC.scr_line_offs); // determine current position
       else
          CPC.scr_base = retro_getScreenPtr(); // reset to surface start
-
+#else
+      if (VDU.scrln > 0)
+         CPC.scr_base = amstrad_getScreenPtr() + (VDU.scrln * CPC.scr_line_offs); // determine current position
+      else
+         CPC.scr_base = amstrad_getScreenPtr(); // reset to surface start
+#endif
       CPC.scr_pos = CPC.scr_base + dwOffset; // update current rendering position
 
-      iExitCondition = z80_execute(); // run the emulation until an exit condition is met
+      iExitCondition = cap32_z80_execute(); // run the emulation until an exit condition is met
 
       /*
        * now using per sample sound mixer, this part is unused now
@@ -2048,16 +2268,14 @@ int capmain (int argc, char **argv)
       CPC.snd_enabled = 0; // disable sound emulation
    }
 
-   if (emulator_init())
+   if (caprice_emulator_init())
    {
-      fprintf(stderr, "emulator_init() failed. Aborting.\n");
+      fprintf(stderr, "caprice_emulator_init() failed. Aborting.\n");
       exit(-1);
    }
 
    memset(&driveA, 0, sizeof(t_drive)); // clear disk drive A data structure
    memset(&driveB, 0, sizeof(t_drive)); // clear disk drive B data structure
-
-   dwTicksOffset     = (int)(FRAME_PERIOD_MS / (double)(CPC.speed/CPC_BASE_FREQUENCY_MHZ));
 
    emu_status = COMPUTER_READY; // set computer init as completed
 

@@ -41,12 +41,16 @@
 //#define DEBUG_TAPE
 //#define DEBUG_Z80
 
+#ifndef TARGET_GNW
 #ifndef _MAX_PATH
  #ifdef _POSIX_PATH_MAX
  #define _MAX_PATH _POSIX_PATH_MAX
  #else
  #define _MAX_PATH 256
  #endif
+#endif
+#else
+#define _MAX_PATH 2
 #endif
 
 #define CPC_BASE_FREQUENCY_MHZ 4.0
@@ -56,7 +60,11 @@
 
 // max emulated RAM is 64 + 512
 // https://www.grimware.org/doku.php/documentations/devices/gatearraydo=export_xhtml#mmr
+#ifndef TARGET_GNW
 #define CPC_MAX_RAM 576
+#else
+#define CPC_MAX_RAM 128
+#endif
 
 #define CPC_SCR_WIDTH 1024 // max width
 #define CPC_SCR_HEIGHT 312 // max height
@@ -70,8 +78,12 @@
 #define CPC_MODEL_464 0
 #define CPC_MODEL_664 1
 #define CPC_MODEL_6128 2
+#ifndef TARGET_GNW
 #define CPC_MODEL_PLUS 3
 #define CPC_MODEL_MAX 3
+#else
+#define CPC_MODEL_MAX 2
+#endif
 
 #define ICN_DISK_WIDTH 14
 #define ICN_DISK_HEIGHT 16
@@ -219,15 +231,15 @@ typedef struct {
    unsigned int jumpers;
    unsigned int ram_size;
    unsigned int speed;
-   unsigned int limit_speed;
    unsigned int paused;
-   unsigned int auto_pause;
    unsigned int keyboard_line;
    unsigned int tape_motor;
    unsigned int tape_play_button;
    unsigned int printer;
    unsigned int printer_port;
+#ifndef TARGET_GNW
    unsigned int mf2;
+#endif
    unsigned int keyboard;
    unsigned int joysticks;
    int cycle_count;
@@ -309,7 +321,9 @@ typedef struct {
 
    char rom_path[_MAX_PATH + 1];
    char rom_file[16][_MAX_PATH + 1];
+#ifndef TARGET_GNW
    char rom_mf2[_MAX_PATH + 1];
+#endif
 } t_CPC;
 
 typedef struct {
@@ -480,8 +494,17 @@ typedef struct {
    unsigned int write_protected; // is the image write protected?
    unsigned int random_DEs; // sectors with Data Errors return random data?
    unsigned int flipped; // reverse the side to access?
+   unsigned char *raw_data; // pointer to track data
    bool extended;
+#ifndef TARGET_GNW
    t_track track[DSK_TRACKMAX][DSK_SIDEMAX]; // array of track information structures
+#else
+   t_track track; // array of track information structures
+   int loaded_track; // location of drive head
+   int loaded_side; // side being accessed
+   bool is_compressed; // side being accessed
+   unsigned char decompress_buffer[DSK_BPTMAX+0x100]; // Work buffer
+#endif
 } t_drive;
 
 typedef struct {
@@ -507,22 +530,35 @@ typedef struct {
    unsigned char sector_ids[2][16]; // sector IDs
 } t_disk_format;
 
+// kbdauto.c
+bool kbd_buf_update();
+void kbd_buf_feed(char *s);
+void vkbd_key(int key,int pressed);
 
-// cap32.cpp
+// cap32.c
+void caprice_retro_loop(void);
+int capmain (int argc, char **argv);
 void emulator_reset(bool bolMF2Reset);
+void cap32_set_palette(int palette);
 int video_set_palette (void);
 void video_set_palette_antialias (void);
 int emulator_select_ROM (void);
 size_t get_ram_size(void);
+void amstrad_set_audio_buffer(int8_t *buffer, uint32_t size);
 
 // fdc.c
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+int attach_disk_buffer(char *buffer, int drive);
+int detach_disk(int drive);
+
 unsigned char* sector_get_read_data(t_sector * sector);
 void sector_set_sizes(t_sector * sector, unsigned int size, unsigned int total_size);
 
+void cap32_check_unit(void);
+void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side);
 void fdc_write_data(unsigned char val);
 unsigned char fdc_read_status(void);
 uint8_t fdc_read_data(void);

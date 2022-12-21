@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-#include "z80.h"
+#include "cap32_z80.h"
 
 // The next 4 bytes must remain together
 typedef union
@@ -67,6 +67,8 @@ void crtc_cycle(int repeat_count);
 void crtc_init(void);
 void crtc_reset(void);
 
+void render8bpp(void);
+void render8bpp_doubleY(void);
 void render16bpp(void);
 void render16bpp_doubleY(void);
 void render32bpp(void);

@@ -46,7 +46,7 @@
 #include <retro_endianness.h>
 
 #include "cap32.h"
-#include "z80.h"
+#include "cap32_z80.h"
 
 extern t_CPC CPC;
 extern t_PSG PSG;
@@ -422,11 +422,11 @@ static INLINE void Synthesizer_Logic_Q(void)
    if (Envelope_Counter.Hi >= ((uint16_t) (PSG.RegisterAY.EnvelopeLo + (PSG.RegisterAY.EnvelopeHi<<8))))
 #else
    if (Envelope_Counter.Hi >= *(uint16_t *)&PSG.RegisterAY.EnvelopeLo)
-
 #endif
       Envelope_Counter.Hi = 0;
 }
 
+#ifndef TARGET_GNW
 static INLINE void Synthesizer_Mixer_Q(void)
 {
    int LevL, LevR, k;
@@ -441,7 +441,7 @@ static INLINE void Synthesizer_Mixer_Q(void)
 #ifdef MSB_FIRST
       if ((!Envelope_EnA) || (((uint16_t) (PSG.RegisterAY.TonALo + (PSG.RegisterAY.TonAHi<<8))) > 4))
 #else
-       if ((!Envelope_EnA) || (*(uint16_t *)&PSG.RegisterAY.TonALo > 4))
+      if ((!Envelope_EnA) || (*(uint16_t *)&PSG.RegisterAY.TonALo > 4))
 #endif
          k = Ton_A;
       else
@@ -607,6 +607,7 @@ void Synthesizer_Stereo8(void)
       PSG.buffer_full = 1;
    }
 }
+#endif
 
 static INLINE void Synthesizer_Mixer_Q_Mono(void)
 {
@@ -708,6 +709,7 @@ void Synthesizer_Mono16(void)
 
 
 
+#ifndef TARGET_GNW
 void Synthesizer_Mono8(void)
 {
    int Tick_Counter = 0;
@@ -729,7 +731,7 @@ void Synthesizer_Mono8(void)
       PSG.buffer_full = 1;
    }
 }
-
+#endif
 
 
 void Calculate_Level_Tables(void)
@@ -832,11 +834,19 @@ void ResetAYChipEmulation(void)
 
 void InitAYCounterVars(void)
 {
+#ifndef TARGET_GNW
    CPC.snd_cycle_count_init.both = (int64_t)rint((4000000 * ((CPC.speed * 25) / 100.0)) /
          freq_table[CPC.snd_playback_rate] * 4294967296.0); // number of Z80 cycles per sample
 
    LoopCountInit = (int64_t)rint(1000000.0 / (4000000.0 * ((CPC.speed * 25) / 100.0)) / 8.0 *
          CPC.snd_cycle_count_init.both); // number of AY counter increments per sample
+#else
+   CPC.snd_cycle_count_init.both = (int64_t)rint(4000000 /
+         freq_table[CPC.snd_playback_rate] * 4294967296.0); // number of Z80 cycles per sample
+
+   LoopCountInit = (int64_t)rint(1000000.0 / 4000000.0 / 8.0 *
+         CPC.snd_cycle_count_init.both); // number of AY counter increments per sample
+#endif
    LoopCount.Re  = LoopCountInit;
 }
 
@@ -854,6 +864,7 @@ void InitAY(void)
    ResetAYChipEmulation();
 
    // stereo mode?
+#ifndef TARGET_GNW
    if (CPC.snd_stereo)
    {
       if (CPC.snd_bits) // 16 bits per sample?
@@ -869,4 +880,7 @@ void InitAY(void)
       else // 8 bits
          PSG.Synthesizer = Synthesizer_Mono8;
    }
+#else
+   PSG.Synthesizer = Synthesizer_Mono16;
+#endif
 }

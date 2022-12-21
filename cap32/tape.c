@@ -33,7 +33,7 @@
 
 #include "cap32.h"
 #include "tape.h"
-#include "z80.h"
+#include "cap32_z80.h"
 
 #define TAPE_PILOT_STAGE 1
 #define TAPE_SYNC_STAGE 2

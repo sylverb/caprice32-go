@@ -58,10 +58,12 @@
                            DI did not clear the z80.EI_issued counter
 */
 //RETRO DIFF
-#include "z80.h"
+#include "cap32_z80.h"
 #include "cap32.h"
 #include "tape.h"
+#ifndef TARGET_GNW
 #include "asic.h"
+#endif
 
 extern t_CPC CPC;
 extern t_FDC FDC;
@@ -69,8 +71,10 @@ extern t_GateArray GateArray;
 extern t_PSG PSG;
 extern t_VDU VDU;
 extern uint8_t *pbTapeImage;
+#ifndef TARGET_GNW
 extern uint32_t dwMF2Flags;
 extern uint32_t dwMF2ExitAddr;
+#endif
 
 extern int iTapeCycleCount;
 
@@ -194,7 +198,7 @@ static uint8_t SZP[256]; // zero, sign and parity flags
 static uint8_t SZHV_inc[256]; // zero, sign, half carry and overflow flags INC r8
 static uint8_t SZHV_dec[256]; // zero, sign, half carry and overflow flags DEC r8
 
-#include "z80daa.h"
+#include "cap32_z80daa.h"
 
 static uint8_t irep_tmp1[4][4] = {
    {0, 0, 1, 0}, {0, 1, 0, 1}, {1, 0, 1, 1}, {0, 1, 1, 0}
@@ -359,29 +363,36 @@ extern uint8_t *membank_read[4], *membank_write[4];
 
 static INLINE uint8_t read_mem(uint16_t addr)
 {
+#ifndef TARGET_GNW
    if (GateArray.registerPageOn) {
       uint8_t value;
       if(!asic_register_page_read(addr, &value))
          return value;
    }
+#endif
    return (*(membank_read[addr >> 14] + (addr & 0x3fff))); // returns a byte from a 16KB memory bank
 }
 
 static INLINE void write_mem(uint16_t addr, uint8_t val)
 {
+#ifndef TARGET_GNW
    if (GateArray.registerPageOn) {
       if(!asic_register_page_write(addr, val))
          return;
    }
+#endif
    *(membank_write[addr >> 14] + (addr & 0x3fff)) = val; // writes a byte to a 16KB memory bank
 }
 
 static INLINE uint8_t read_ptr(){
+#ifndef TARGET_GNW
    if(!asic.locked)
       return asic_int();
+#endif
    return 0xFF;
 }
 
+#ifndef TARGET_GNW
 #define z80_wait_states \
 { \
    if (iCycleCount) { \
@@ -414,6 +425,34 @@ static INLINE uint8_t read_ptr(){
       CPC.cycle_count -= iCycleCount; \
    } \
 }
+#else
+#define z80_wait_states \
+{ \
+   if (iCycleCount) { \
+      crtc_cycle(iCycleCount >> 2); \
+      if (CPC.snd_enabled) { \
+         PSG.cycle_count.high += iCycleCount; \
+         if (PSG.cycle_count.high >= CPC.snd_cycle_count_init.high) { \
+            PSG.cycle_count.both -= CPC.snd_cycle_count_init.both; \
+            PSG.Synthesizer(); \
+         } \
+      } \
+      if (FDC.phase == EXEC_PHASE) { \
+         FDC.timeout -= iCycleCount; \
+         if (FDC.timeout <= 0) { \
+            FDC.flags |= OVERRUN_flag; \
+            if (FDC.cmd_direction == FDC_TO_CPU) { \
+               fdc_read_data(); \
+            } \
+            else { \
+               fdc_write_data(0xff); \
+            } \
+         } \
+      } \
+      CPC.cycle_count -= iCycleCount; \
+   } \
+}
+#endif
 
 #define ADC(value) \
 { \
@@ -1002,7 +1041,7 @@ void z80_init_tables(void)
 }
 
 
-
+#ifndef TARGET_GNW
 void z80_mf2stop(void)
 {
    _R++;
@@ -1017,15 +1056,18 @@ void z80_mf2stop(void)
    z80_wait_states
    dwMF2Flags = MF2_ACTIVE | MF2_RUNNING;
 }
+#endif
 
 
-
-int z80_execute(void)
+int cap32_z80_execute(void)
 {
    uint8_t bOpCode;
 
+#ifndef TARGET_GNW
    while (_PCdword != z80.break_point) { // loop until break point
-
+#else
+   while (true) { // loop until break point
+#endif
       #ifdef DEBUG_Z80
       dbg_z80_diff = abs(dbg_z80_lastPC - _PC);
       if (dbg_z80_diff > 0x100) {
@@ -1037,11 +1079,13 @@ int z80_execute(void)
       dbg_z80_lastPC = _PC;
       #endif
 
+#ifndef TARGET_GNW
       if (dwMF2Flags & MF2_RUNNING) {
          if (_PCdword == dwMF2ExitAddr) { // have we returned from the MF2?
             dwMF2Flags = MF2_INVISIBLE; // clear running flag and make the MF2 'invisible'
          }
       }
+#endif
 
       bOpCode = read_mem(_PC++);
       iCycleCount = cc_op[bOpCode];
@@ -1328,11 +1372,14 @@ int z80_execute(void)
       }
       iWSAdjust = 0;
 
+#ifndef TARGET_GNW
       if (z80.trace) { // tracing instructions?
          z80.trace = 0; // reset trace condition
          return EC_TRACE; // exit emulation loop
       }
-      else if (VDU.frame_completed) { // video emulation finished building frame?
+      else
+#endif
+      if (VDU.frame_completed) { // video emulation finished building frame?
          VDU.frame_completed = 0;
          return EC_FRAME_COMPLETE; // exit emulation loop
       }

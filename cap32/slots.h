@@ -33,6 +33,7 @@ int snapshot_save (char *pchFileName);
 
 void dsk_eject (t_drive *drive);
 int dsk_load (char *pchFileName, t_drive *drive, char chID);
+int dsk_load_buffer (char *buffer, t_drive *drive, char chID);
 int dsk_save (char *pchFileName, t_drive *drive, char chID);
 int dsk_format (t_drive *drive, int iFormat);
 

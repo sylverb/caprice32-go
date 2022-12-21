@@ -86,7 +86,7 @@ extern int tape_insert (char *pchFileName);
 extern int cart_start (char *pchFileName);
 extern void enter_gui(void);
 extern int Retro_PollEvent();
-extern void retro_loop(void);
+extern void caprice_retro_loop(void);
 extern int video_set_palette (void);
 extern int InitOSGLU(void);
 extern int  UnInitOSGLU(void);
@@ -122,7 +122,7 @@ int emu_status = COMPUTER_OFF;
 //CAP32 DEF BEGIN
 #include "cap32.h"
 #include "slots.h"
-//#include "z80.h"
+//#include "cap32_z80.h"
 extern t_CPC CPC;
 extern uint8_t *pbSndBuffer;
 //CAP32 DEF END
@@ -758,7 +758,7 @@ void retro_shutdown_core(void)
 
 void retro_reset(void)
 {
-   emu_reset();
+   cap32_emu_reset();
    computer_reset();
 }
 
@@ -1459,7 +1459,7 @@ void retro_run(void)
       retro_message("options updated, changes applied!");
    }
 
-   retro_loop();
+   caprice_retro_loop();
 
    retro_PollEvent();
    retro_ui_process();

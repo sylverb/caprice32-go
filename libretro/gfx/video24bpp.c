@@ -42,7 +42,7 @@
 #include "assets/assets.h"
 
 extern t_GateArray GateArray;
-extern uint32_t colours[32];
+extern uint32_t amstrad_colours[32];
 
 static union TPixel pixel;
 
@@ -60,9 +60,9 @@ static union TPixel pixel;
 void video_set_palette_antialias_24bpp(void)
 {
    uint8_t r2,g2,b2;
-   r2=RGB2RED(colours[GateArray.ink_values[0]]) + RGB2RED(colours[GateArray.ink_values[1]]);
-   g2=RGB2GREEN(colours[GateArray.ink_values[0]]) + RGB2GREEN(colours[GateArray.ink_values[1]]);
-   b2=RGB2BLUE(colours[GateArray.ink_values[0]]) + RGB2BLUE(colours[GateArray.ink_values[1]]);
+   r2=RGB2RED(amstrad_colours[GateArray.ink_values[0]]) + RGB2RED(amstrad_colours[GateArray.ink_values[1]]);
+   g2=RGB2GREEN(amstrad_colours[GateArray.ink_values[0]]) + RGB2GREEN(amstrad_colours[GateArray.ink_values[1]]);
+   b2=RGB2BLUE(amstrad_colours[GateArray.ink_values[0]]) + RGB2BLUE(amstrad_colours[GateArray.ink_values[1]]);
    GateArray.palette[33] = (unsigned short) RGB2COLOR(r2/2, g2/2, b2/2);
 }
 
