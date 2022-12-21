@@ -1,3 +1,8 @@
+#ifdef TARGET_GNW
+#include "build/config.h"
+#endif
+
+#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -653,4 +658,4 @@ void kbd_update_table(int lang) {
          break;
    }
 }
-
+#endif

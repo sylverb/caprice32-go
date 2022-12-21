@@ -57,6 +57,11 @@
    May 15, 2003 - 23:19    "Thomas the Tank Engine", "N.E.X.O.R." and "Jocky Wilson's Darts Compendium" work now:
                            DI did not clear the z80.EI_issued counter
 */
+#ifdef TARGET_GNW
+#include "build/config.h"
+#endif
+
+#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 //RETRO DIFF
 #include "cap32_z80.h"
 #include "cap32.h"
@@ -3017,3 +3022,4 @@ void z80_pfx_fdcb(void)
       case srl_mhl:     { uint8_t b = read_mem(_IY+o); write_mem(_IY+o, SRL(b)); } break;
    }
 }
+#endif

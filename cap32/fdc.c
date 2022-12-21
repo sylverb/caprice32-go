@@ -50,6 +50,11 @@
                         ("Starfox - CPM version" loads)
 */
 
+#ifdef TARGET_GNW
+#include "build/config.h"
+#endif
+
+#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include "cap32.h"
 #include "cap32_z80.h"
 #include "lzma.h"
@@ -1252,3 +1257,4 @@ void fdc_scan(void)
          FDC.phase = RESULT_PHASE; // switch to result phase
    }
 }
+#endif

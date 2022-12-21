@@ -22,6 +22,11 @@
  *            http://david.dantoine.org/proyecto/26/
  */
 
+#ifdef TARGET_GNW
+#include "build/config.h"
+#endif
+
+#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include "cap32.h"
 #include "slots.h"
 #include "crtc.h"
@@ -1496,5 +1501,7 @@ int tape_insert_voc (char *pchFileName)
 
    return 0;
 }
+
+#endif
 
 #endif
