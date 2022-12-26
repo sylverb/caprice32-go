@@ -605,6 +605,11 @@ void vkbd_key(int key,int pressed){
 
 }
 
+
+int vkbd_key_state(int key) {
+   return !(keyboard_matrix[(unsigned char)key >> 4] & bit_values2[(unsigned char)key & 7]);
+}
+
 void kbd_update_table(int lang) {
    switch (lang)
    {

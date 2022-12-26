@@ -534,6 +534,7 @@ typedef struct {
 bool kbd_buf_update();
 void kbd_buf_feed(char *s);
 void vkbd_key(int key,int pressed);
+int vkbd_key_state(int key);
 
 // cap32.c
 void caprice_retro_loop(void);
