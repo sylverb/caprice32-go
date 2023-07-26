@@ -37,7 +37,6 @@
 #ifndef TARGET_GNW
 #include "retro_utils.h"
 #else
-#include "save_amstrad.h"
 #include "filesystem.h"
 #endif
 #include "rom/cpm.h"
