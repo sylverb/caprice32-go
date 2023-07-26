@@ -38,6 +38,7 @@
 #include "retro_utils.h"
 #else
 #include "save_amstrad.h"
+#include "filesystem.h"
 #endif
 #include "rom/cpm.h"
 
@@ -292,35 +293,32 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
    return 0; // dump ok!
 }
 
-int cap32_save_state() {
-   SaveState *state = amstradSaveStateOpenForWrite("amstrad");
-
-   amstradSaveStateSetBuffer(state, "cpc",  &CPC, sizeof(t_CPC));
-   amstradSaveStateSetBuffer(state, "z80",  &z80, sizeof(t_z80regs));
-   amstradSaveStateSetBuffer(state, "GateArray",  &GateArray, sizeof(t_GateArray));
-   amstradSaveStateSetBuffer(state, "CRTC",  &CRTC, sizeof(t_CRTC));
-   amstradSaveStateSetBuffer(state, "PPI",  &PPI, sizeof(t_PPI));
-   amstradSaveStateSetBuffer(state, "PSG",  &PSG, sizeof(t_PSG));
-   amstradSaveStateSetBuffer(state, "VDU",  &VDU, sizeof(t_VDU));
-   amstradSaveStateSetBuffer(state, "FDC",  &FDC, sizeof(t_FDC));
-   amstradSaveStateSetBuffer(state, "VDU",  pbRAM, 128*1024);
-   amstradSaveStateSet(state, "driveA.current_track", driveA.current_track);
-   amstradSaveStateSet(state, "driveA.current_side", driveA.current_side);
-   amstradSaveStateSet(state, "driveA.current_sector", driveA.current_sector);
-
+int cap32_save_state(fs_file_t *file) {
+   fs_write(file, &CPC, sizeof(t_CPC));
+   fs_write(file, &z80, sizeof(t_z80regs));
+   fs_write(file, &GateArray, sizeof(t_GateArray));
+   fs_write(file, &CRTC, sizeof(t_CRTC));
+   fs_write(file, &PPI, sizeof(t_PPI));
+   fs_write(file, &PSG, sizeof(t_PSG));
+   fs_write(file, &VDU, sizeof(t_VDU));
+   fs_write(file, &FDC, sizeof(t_FDC));
+   fs_write(file, pbRAM, 128*1024);
+   fs_write(file, &driveA.current_track, 4);
+   fs_write(file, &driveA.current_side, 4);
+   fs_write(file, &driveA.current_sector, 4);
    return 0;
 }
 
-int cap32_load_state() {
-   uint8_t val;
+int cap32_load_state(fs_file_t *file) {
    int n;
    reg_pair port;
+   uint8_t val;
 
-   SaveState* state = amstradSaveStateOpenForRead("amstrad");
-   amstradSaveStateGetBuffer(state, "cpc",  &CPC, sizeof(t_CPC));
-   amstradSaveStateGetBuffer(state, "z80",  &z80, sizeof(t_z80regs));
-   // Gate Array
-   amstradSaveStateGetBuffer(state, "GateArray",  &GateArray, sizeof(t_GateArray));
+   fs_read(file, &CPC, sizeof(t_CPC));
+   fs_read(file, &z80, sizeof(t_z80regs));
+
+
+   fs_read(file, &GateArray, sizeof(t_GateArray));
    port.b.h = 0x7f;
    val = GateArray.pen;
    for (n = 0; n < 17; n++) { // loop for all colours + border
@@ -336,8 +334,8 @@ int cap32_load_state() {
    val = GateArray.RAM_config; // GA RAM configuration
    z80_OUT_handler(port, (val & 0x3f) | (3 << 6));
 
-   // CRTC
-   amstradSaveStateGetBuffer(state, "CRTC",  &CRTC, sizeof(t_CRTC));
+
+   fs_read(file, &CRTC, sizeof(t_CRTC));
    port.b.h = 0xbd;
    for (n = 0; n < 18; n++) { // loop for all CRTC registers
       val = CRTC.registers[n];
@@ -353,8 +351,8 @@ int cap32_load_state() {
    val = GateArray.upper_ROM; // upper ROM number
    z80_OUT_handler(port, val);
 
-   // PPI
-   amstradSaveStateGetBuffer(state, "PPI",  &PPI, sizeof(t_PPI));
+
+   fs_read(file, &PPI, sizeof(t_PPI));
    port.b.h = 0xf4; // port A
    z80_OUT_handler(port, PPI.portA);
    port.b.h = 0xf5; // port B
@@ -364,14 +362,16 @@ int cap32_load_state() {
    port.b.h = 0xf7; // control
    z80_OUT_handler(port, PPI.control);
 
-   amstradSaveStateGetBuffer(state, "PSG",  &PSG, sizeof(t_PSG));
-   amstradSaveStateGetBuffer(state, "VDU",  &VDU, sizeof(t_VDU));
-   amstradSaveStateGetBuffer(state, "FDC",  &FDC, sizeof(t_FDC));
-   amstradSaveStateGetBuffer(state, "VDU",  pbRAM, 128*1024);
 
-   driveA.current_track = amstradSaveStateGet(state, "driveA.current_track");
-   driveA.current_side = amstradSaveStateGet(state, "driveA.current_side");
-   driveA.current_sector = amstradSaveStateGet(state, "driveA.current_sector");
+   fs_read(file, &PSG, sizeof(t_PSG));
+   fs_read(file, &VDU, sizeof(t_VDU));
+   fs_read(file, &FDC, sizeof(t_FDC));
+   fs_read(file, pbRAM, 128*1024);
+   fs_read(file, &driveA.current_track, 4);
+   fs_read(file, &driveA.current_side, 4);
+   fs_read(file, &driveA.current_sector, 4);
+
+
    driveA.loaded_track = -1;
    driveA.loaded_side = -1;
    cap32_check_unit();
