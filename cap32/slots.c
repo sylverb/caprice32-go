@@ -293,18 +293,18 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
 }
 
 int cap32_save_state(fs_file_t *file) {
-   fs_write(file, &CPC, sizeof(t_CPC));
-   fs_write(file, &z80, sizeof(t_z80regs));
-   fs_write(file, &GateArray, sizeof(t_GateArray));
-   fs_write(file, &CRTC, sizeof(t_CRTC));
-   fs_write(file, &PPI, sizeof(t_PPI));
-   fs_write(file, &PSG, sizeof(t_PSG));
-   fs_write(file, &VDU, sizeof(t_VDU));
-   fs_write(file, &FDC, sizeof(t_FDC));
-   fs_write(file, pbRAM, 128*1024);
-   fs_write(file, &driveA.current_track, 4);
-   fs_write(file, &driveA.current_side, 4);
-   fs_write(file, &driveA.current_sector, 4);
+   fs_write(file, (unsigned char *)&CPC, sizeof(t_CPC));
+   fs_write(file, (unsigned char *)&z80, sizeof(t_z80regs));
+   fs_write(file, (unsigned char *)&GateArray, sizeof(t_GateArray));
+   fs_write(file, (unsigned char *)&CRTC, sizeof(t_CRTC));
+   fs_write(file, (unsigned char *)&PPI, sizeof(t_PPI));
+   fs_write(file, (unsigned char *)&PSG, sizeof(t_PSG));
+   fs_write(file, (unsigned char *)&VDU, sizeof(t_VDU));
+   fs_write(file, (unsigned char *)&FDC, sizeof(t_FDC));
+   fs_write(file, (unsigned char *)pbRAM, 128*1024);
+   fs_write(file, (unsigned char *)&driveA.current_track, 4);
+   fs_write(file, (unsigned char *)&driveA.current_side, 4);
+   fs_write(file, (unsigned char *)&driveA.current_sector, 4);
    return 0;
 }
 
@@ -313,11 +313,11 @@ int cap32_load_state(fs_file_t *file) {
    reg_pair port;
    uint8_t val;
 
-   fs_read(file, &CPC, sizeof(t_CPC));
-   fs_read(file, &z80, sizeof(t_z80regs));
+   fs_read(file, (unsigned char *)&CPC, sizeof(t_CPC));
+   fs_read(file, (unsigned char *)&z80, sizeof(t_z80regs));
 
 
-   fs_read(file, &GateArray, sizeof(t_GateArray));
+   fs_read(file, (unsigned char *)&GateArray, sizeof(t_GateArray));
    port.b.h = 0x7f;
    val = GateArray.pen;
    for (n = 0; n < 17; n++) { // loop for all colours + border
@@ -334,7 +334,7 @@ int cap32_load_state(fs_file_t *file) {
    z80_OUT_handler(port, (val & 0x3f) | (3 << 6));
 
 
-   fs_read(file, &CRTC, sizeof(t_CRTC));
+   fs_read(file, (unsigned char *)&CRTC, sizeof(t_CRTC));
    port.b.h = 0xbd;
    for (n = 0; n < 18; n++) { // loop for all CRTC registers
       val = CRTC.registers[n];
@@ -351,7 +351,7 @@ int cap32_load_state(fs_file_t *file) {
    z80_OUT_handler(port, val);
 
 
-   fs_read(file, &PPI, sizeof(t_PPI));
+   fs_read(file, (unsigned char *)&PPI, sizeof(t_PPI));
    port.b.h = 0xf4; // port A
    z80_OUT_handler(port, PPI.portA);
    port.b.h = 0xf5; // port B
@@ -362,13 +362,13 @@ int cap32_load_state(fs_file_t *file) {
    z80_OUT_handler(port, PPI.control);
 
 
-   fs_read(file, &PSG, sizeof(t_PSG));
-   fs_read(file, &VDU, sizeof(t_VDU));
-   fs_read(file, &FDC, sizeof(t_FDC));
-   fs_read(file, pbRAM, 128*1024);
-   fs_read(file, &driveA.current_track, 4);
-   fs_read(file, &driveA.current_side, 4);
-   fs_read(file, &driveA.current_sector, 4);
+   fs_read(file, (unsigned char *)&PSG, sizeof(t_PSG));
+   fs_read(file, (unsigned char *)&VDU, sizeof(t_VDU));
+   fs_read(file, (unsigned char *)&FDC, sizeof(t_FDC));
+   fs_read(file, (unsigned char *)pbRAM, 128*1024);
+   fs_read(file, (unsigned char *)&driveA.current_track, 4);
+   fs_read(file, (unsigned char *)&driveA.current_side, 4);
+   fs_read(file, (unsigned char *)&driveA.current_sector, 4);
 
 
    driveA.loaded_track = -1;
