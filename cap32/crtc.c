@@ -36,11 +36,6 @@
    Jul 08, 2004 - 16:58 started implementing Richard's assembly CRTC emulation in C
 */
 
-#ifdef TARGET_GNW
-#include "build/config.h"
-#endif
-
-#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include <math.h>
 #include <retro_endianness.h>
 
@@ -1530,4 +1525,3 @@ void crtc_reset(void)
    MaxVSync = MinVSync + MIN_VHOLD_RANGE + (int)ceil((float)((MinVSync - MIN_VHOLD) *
     (MAX_VHOLD_RANGE - MIN_VHOLD_RANGE) / (MAX_VHOLD - MIN_VHOLD)));
 }
-#endif

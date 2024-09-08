@@ -162,11 +162,6 @@
    May 29, 2004 - 18:09 reintroduced tape_eject, tape_insert and tape_insert_voc; added sound support via the native SDL audio routines
 */
 
-#ifdef TARGET_GNW
-#include "build/config.h"
-#endif
-
-#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 /* forward declarations - some libretro port callbacks */
 void doCleanUp (void);
 int theloop(void);
@@ -2286,4 +2281,3 @@ int capmain (int argc, char **argv)
 
    return 0;
 }
-#endif

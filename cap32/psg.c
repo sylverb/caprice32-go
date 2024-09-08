@@ -42,11 +42,6 @@
    Jun 04, 2003 - 19:37 added support for Digiblaster/Soundplayer on the printer port
 */
 
-#ifdef TARGET_GNW
-#include "build/config.h"
-#endif
-
-#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include <math.h>
 #include <retro_endianness.h>
 
@@ -889,4 +884,3 @@ void InitAY(void)
    PSG.Synthesizer = Synthesizer_Mono16;
 #endif
 }
-#endif

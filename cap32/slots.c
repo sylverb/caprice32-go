@@ -22,11 +22,6 @@
  *            http://david.dantoine.org/proyecto/26/
  */
 
-#ifdef TARGET_GNW
-#include "build/config.h"
-#endif
-
-#if !defined(TARGET_GNW) || (defined(TARGET_GNW) &&  defined(ENABLE_EMULATOR_AMSTRAD))
 #include "cap32.h"
 #include "slots.h"
 #include "crtc.h"
@@ -36,8 +31,6 @@
 #include "errors.h"
 #ifndef TARGET_GNW
 #include "retro_utils.h"
-#else
-#include "filesystem.h"
 #endif
 #include "rom/cpm.h"
 
@@ -292,6 +285,7 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
    return 0; // dump ok!
 }
 
+/*
 int cap32_save_state(fs_file_t *file) {
    fs_write(file, (unsigned char *)&CPC, sizeof(t_CPC));
    fs_write(file, (unsigned char *)&z80, sizeof(t_z80regs));
@@ -378,6 +372,7 @@ int cap32_load_state(fs_file_t *file) {
    cap32_fdc_load_track(&driveA, driveA.loaded_track, driveA.loaded_side);
    return 0;
 }
+*/
 
 
 /**
@@ -1500,7 +1495,5 @@ int tape_insert_voc (char *pchFileName)
 
    return 0;
 }
-
-#endif
 
 #endif
