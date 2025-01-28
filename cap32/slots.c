@@ -650,12 +650,16 @@ void dsk_eject (t_drive *drive)
 #endif
 }
 
-#ifndef TARGET_GNW
+#if !defined(TARGET_GNW) || SD_CARD == 1
 int dsk_load (char *pchFileName, t_drive *drive, char chID)
 {
    int iRetCode;
-   uint32_t dwTrackSize, track, side, sector, dwSectorSize, dwSectors;
-   uint8_t *pbPtr, *pbDataPtr, *pbTempPtr, *pbTrackSizeTable;
+   uint32_t dwTrackSize, track, side, dwSectors;
+   uint8_t *pbPtr, *pbTrackSizeTable;
+#ifndef TARGET_GNW
+   uint32_t dwSectorSize, sector;
+   uint8_t *pbDataPtr, *pbTempPtr;
+#endif
 
    #ifdef _UNITTEST_DEBUG
    printf("[ dsk_load ] %s\n", pchFileName);
@@ -694,11 +698,12 @@ int dsk_load (char *pchFileName, t_drive *drive, char chID)
                   iRetCode = ERR_DSK_INVALID;
                   goto exit;
                }
-               dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
                dwSectors = *(pbPtr + 0x15); // grab number of sectors
                if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
                   dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
                }
+#ifndef TARGET_GNW
+               dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
                drive->track[track][side].sectors = dwSectors; // store sector count
                drive->track[track][side].size = dwTrackSize; // store track size
                drive->track[track][side].data = (uint8_t *)malloc(dwTrackSize); // attempt to allocate the required memory
@@ -720,6 +725,12 @@ int dsk_load (char *pchFileName, t_drive *drive, char chID)
                   iRetCode = ERR_DSK_INVALID;
                   goto exit;
                }
+#else
+               if (dwTrackSize > 0 && fseek(pfileObject, dwTrackSize, SEEK_CUR) != 0) { // read entire track data in one go
+                  iRetCode = ERR_DSK_INVALID;
+                  goto exit;
+               }
+#endif
             }
          }
          drive->extended = false; // normal disk - used on loader
@@ -756,6 +767,7 @@ int dsk_load (char *pchFileName, t_drive *drive, char chID)
                      if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
                         dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
                      }
+#ifndef TARGET_GNW
                      drive->track[track][side].sectors = dwSectors; // store sector count
                      drive->track[track][side].size = dwTrackSize; // store track size
                      drive->track[track][side].data = (uint8_t *)malloc(dwTrackSize); // attempt to allocate the required memory
@@ -782,6 +794,12 @@ int dsk_load (char *pchFileName, t_drive *drive, char chID)
                      }
                   } else {
                      memset(&drive->track[track][side], 0, sizeof(t_track)); // track not formatted
+#else
+                     if (dwTrackSize > 0 && fseek(pfileObject, dwTrackSize, SEEK_CUR) != 0) { // skip entire track data in one go
+                        iRetCode = ERR_DSK_INVALID;
+                        goto exit;
+                     }
+#endif
                   }
                }
             }
@@ -800,16 +818,23 @@ exit:
 
    if (iRetCode != 0) // on error, 'eject' disk from drive
       dsk_eject(drive);
+#if SD_CARD == 1
+   else
+      sprintf(drive->dsk_name, "%s", pchFileName);
+#endif
 
    return iRetCode;
 }
 #endif
 
-#ifdef TARGET_GNW
+#if defined(TARGET_GNW) && SD_CARD != 1
 int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
 {
    int iRetCode;
-   uint32_t dwTrackSize, track, side, compressedTrackSize;
+   uint32_t dwTrackSize, track, side;
+#ifndef GNW_DISABLE_COMPRESSION
+   uint32_t compressedTrackSize;
+#endif
    uint8_t *pbPtr, *pbTrackSizeTable;
 
    iRetCode = 0;
@@ -831,7 +856,9 @@ int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
          }
          dwTrackSize = (*(pbPtr + 0x32) + (*(pbPtr + 0x33) << 8)) - 0x100; // determine track size in bytes, minus track header
          drive->sides--; // zero base number of sides
+#ifndef GNW_DISABLE_COMPRESSION
          drive->is_compressed = *(pbPtr + 0x34);
+#endif
          pbPtr += 0x100;
          for (track = 0; track < drive->tracks; track++) { // loop for all tracks
             for (side = 0; side <= drive->sides; side++) { // loop for all sides
@@ -839,10 +866,13 @@ int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
                   dsk_eject(drive);
                   return ERR_DSK_INVALID;
                }
+#ifndef GNW_DISABLE_COMPRESSION
                if (drive->is_compressed) {
                   compressedTrackSize = *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
                   pbPtr += 0x100 + compressedTrackSize;
-               } else {
+               } else
+#endif
+               {
                   pbPtr += 0x100 + dwTrackSize;
                }
             }
@@ -861,7 +891,9 @@ int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
          drive->sides = *(pbPtr + 0x31) & 3; // number of sides
          pbTrackSizeTable = pbPtr + 0x34; // pointer to track size table in DSK header
          drive->sides--; // zero base number of sides
+#ifndef GNW_DISABLE_COMPRESSION
          drive->is_compressed = *(pbPtr + 0x32);
+#endif
          pbPtr += 0x100;
          for (track = 0; track < drive->tracks; track++) { // loop for all tracks
             for (side = 0; side <= drive->sides; side++) { // loop for all sides
@@ -872,9 +904,12 @@ int dsk_load_buffer (char *buffer, t_drive *drive, char chID)
                      dsk_eject(drive);
                      return ERR_DSK_INVALID;
                   }
+#ifndef GNW_DISABLE_COMPRESSION
                   if (drive->is_compressed) {
                      pbPtr += 0x100 + *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
-                  } else {
+                  } else
+#endif
+                  {
                      pbPtr += 0x100 + dwTrackSize;
                   }
                }

@@ -496,14 +496,19 @@ typedef struct {
    unsigned int flipped; // reverse the side to access?
    unsigned char *raw_data; // pointer to track data
    bool extended;
-#ifndef TARGET_GNW
+#if !defined(TARGET_GNW)
    t_track track[DSK_TRACKMAX][DSK_SIDEMAX]; // array of track information structures
 #else
-   t_track track; // array of track information structures
+#if SD_CARD == 1
+   char dsk_name[256];
+#endif
+   t_track track; // track information structure
    int loaded_track; // location of drive head
    int loaded_side; // side being accessed
+#ifndef GNW_DISABLE_COMPRESSION
    bool is_compressed; // side being accessed
-   unsigned char decompress_buffer[DSK_BPTMAX+0x100]; // Work buffer
+#endif
+   unsigned char track_buffer[DSK_BPTMAX+0x100]; // Local copy of current track
 #endif
 } t_drive;
 
@@ -552,6 +557,7 @@ void amstrad_set_audio_buffer(int8_t *buffer, uint32_t size);
 extern "C" {
 #endif
 
+int attach_disk(char *arv, int drive);
 int attach_disk_buffer(char *buffer, int drive);
 int detach_disk(int drive);
 

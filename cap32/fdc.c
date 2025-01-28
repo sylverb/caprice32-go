@@ -52,13 +52,17 @@
 
 #include "cap32.h"
 #include "cap32_z80.h"
+#ifndef GNW_DISABLE_COMPRESSION
 #include "lzma.h"
+#endif
 
 #ifndef TARGET_GNW
 #include "retro_snd.h"
 #include "retro_ui.h"
 #endif
-
+#ifdef TARGET_GNW
+extern uint8_t GPBuffer[16*1024]; // general purpose buffer
+#endif
 extern t_CPC CPC;
 extern t_FDC FDC;
 extern t_z80regs z80;
@@ -833,8 +837,140 @@ void fdc_intstat(void)
 }
 
 #ifdef TARGET_GNW
+#if SD_CARD == 1
 void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
 {
+   uint32_t dwTrackSize, track, side, sector, dwSectorSize, dwSectors;
+   uint8_t *pbPtr, *pbPtr2, *pbDataPtr, *pbTrackSizeTable;
+   FILE *pfileObject;
+   pbGPBuffer = GPBuffer;
+   pbPtr = pbGPBuffer;
+
+
+   if ((drive->loaded_track == load_track) && (drive->loaded_side == load_side)) {
+      // track/side already loaded
+      return;
+   }
+
+   drive->track.data = drive->track_buffer;
+
+   if ((pfileObject = fopen(drive->dsk_name, "rb")) != NULL)
+   {
+      if (!drive->extended)
+      {
+         if(!fread(pbGPBuffer, 0x100, 1, pfileObject)) { // read DSK header
+            fclose(pfileObject);
+            return;
+         }
+         dwTrackSize = (*(pbPtr + 0x32) + (*(pbPtr + 0x33) << 8)) - 0x100;
+         pbPtr += 0x100;
+
+         for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+            for (side = 0; side <= drive->sides; side++) { // loop for all sides
+               if(!fread(pbGPBuffer+0x100, 0x100, 1, pfileObject)) { // read track header
+                  fclose(pfileObject);
+                  return;
+               }
+               pbPtr = pbGPBuffer + 0x100;
+
+               dwSectorSize = 0x80 << *(pbPtr + 0x14); // determine sector size in bytes
+               dwSectors = *(pbPtr + 0x15); // grab number of sectors
+               if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
+                  dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
+               }
+               drive->track.sectors = dwSectors; // store sector count
+               drive->track.size = dwTrackSize; // store track size
+
+               printf("1\n");
+               if ((track == load_track) && (side == load_side)) {
+                  pbDataPtr = drive->track.data; // pointer to start of memory buffer
+                  pbPtr2 = pbPtr;
+                  for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+                     memcpy(drive->track.sector[sector].CHRN.data, (pbPtr2 + 0x18), 4); // copy CHRN
+                     memcpy(drive->track.sector[sector].flags, (pbPtr2 + 0x1c), 2); // copy ST1 & ST2
+                     sector_set_sizes(&drive->track.sector[sector], dwSectorSize, dwSectorSize); // weak sectors support
+                     drive->track.sector[sector].data = pbDataPtr; // store pointer to sector data
+                     pbDataPtr += dwSectorSize;
+                     pbPtr2 += 8;
+                  }
+               }
+
+               if ((track == load_track) && (side == load_side)) {
+                  drive->loaded_track = track;
+                  drive->loaded_side = side;
+                  fread(drive->track.data, dwTrackSize, 1, pfileObject);
+                  fclose(pfileObject);
+                  return;
+               } else {
+                  fseek(pfileObject, dwTrackSize, SEEK_CUR);
+               }
+            }
+         }
+      } else {
+      // Extended format
+         if(!fread(pbGPBuffer, 0x100, 1, pfileObject)) { // read DSK header
+            fclose(pfileObject);
+            return;
+         }
+
+         pbTrackSizeTable = pbPtr + 0x34; // pointer to track size table in DSK header
+
+         for (track = 0; track < drive->tracks; track++) { // loop for all tracks
+            for (side = 0; side <= drive->sides; side++) { // loop for all sides
+               dwTrackSize = (*pbTrackSizeTable++ << 8); // track size in bytes
+               if (dwTrackSize != 0) { // only process if track contains data
+                  dwTrackSize -= 0x100; // compensate for track header
+                  if(!fread(pbGPBuffer+0x100, 0x100, 1, pfileObject)) { // read track header
+                     fclose(pfileObject);
+                     return;
+                  }
+                  pbPtr = pbGPBuffer + 0x100;
+
+                  dwSectors = *(pbPtr + 0x15); // number of sectors for this track
+                  if (dwSectors > DSK_SECTORMAX) { // allow maximum sector64 games
+                     dwSectors = DSK_SECTORMAX; // TODO: flag or recalculate
+                  }
+                  drive->track.sectors = dwSectors; // store sector count
+                  drive->track.size = dwTrackSize; // store track size
+
+                  if ((track == load_track) && (side == load_side)) {
+                     pbDataPtr = drive->track.data; // pointer to start of memory buffer
+                     pbPtr2 = pbPtr;
+                     for (sector = 0; sector < dwSectors; sector++) { // loop for all sectors
+                        memcpy(drive->track.sector[sector].CHRN.data, (pbPtr2 + 0x18), 4); // copy CHRN
+                        memcpy(drive->track.sector[sector].flags, (pbPtr2 + 0x1c), 2); // copy ST1 & ST2
+                        uint32_t dwRealSize = 0x80 << *(pbPtr2 + 0x1b);
+                        dwSectorSize = *(pbPtr2 + 0x1e) + (*(pbPtr2 + 0x1f) << 8); // sector size in bytes
+                        sector_set_sizes(&drive->track.sector[sector], dwRealSize, dwSectorSize); // weak sectors support
+                        drive->track.sector[sector].data = pbDataPtr; // store pointer to sector data
+                        pbDataPtr += dwSectorSize;
+                        pbPtr2 += 8;
+                     }
+                  }
+                  if ((track == load_track) && (side == load_side)) {
+                     drive->loaded_track = track;
+                     drive->loaded_side = side;
+                     fread(drive->track.data, dwTrackSize, 1, pfileObject);
+                     fclose(pfileObject);
+                     return;
+                  } else {
+                     fseek(pfileObject, dwTrackSize, SEEK_CUR);
+                  }
+               } else {
+                  if ((track == load_track) && (side == load_side)) {
+                     memset(&drive->track, 0, sizeof(t_track)); // track not formatted
+                     drive->loaded_track = track;
+                     drive->loaded_side = side;
+                     fclose(pfileObject);
+                     return;
+                  }
+               }
+            }
+         }
+      }
+      fclose(pfileObject);
+   }
+#else
    uint32_t dwTrackSize, track, side, sector, dwSectorSize, dwSectors, compressedTrackSize;
    uint8_t *pbPtr, *pbPtr2, *pbDataPtr, *pbTrackSizeTable;
 
@@ -862,18 +998,21 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
             drive->track.sectors = dwSectors; // store sector count
             drive->track.size = dwTrackSize; // store track size
 
+#ifndef GNW_DISABLE_COMPRESSION
             if (drive->is_compressed) {
                compressedTrackSize = *(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8);
                if ((track == load_track) && (side == load_side)) {
                   lzma_inflate(
-                     (uint8_t *)drive->decompress_buffer,
+                     (uint8_t *)drive->track_buffer,
                      dwTrackSize, // Track size
                      (const uint8_t *)pbPtr + 0x100,
                      compressedTrackSize);
 
-                  drive->track.data = drive->decompress_buffer;
+                  drive->track.data = drive->track_buffer;
                }
-            } else {
+            } else
+#endif
+            {
                drive->track.data = pbPtr + 0x100;
             }
 
@@ -889,9 +1028,12 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
                   pbPtr2 += 8;
                }
             }
+#ifndef GNW_DISABLE_COMPRESSION
             if (drive->is_compressed) {
                pbPtr += 0x100 + compressedTrackSize;
-            } else {
+            } else
+#endif
+            {
                pbPtr += 0x100 + dwTrackSize;
             }
             if ((track == load_track) && (side == load_side)) {
@@ -920,17 +1062,20 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
                }
                drive->track.sectors = dwSectors; // store sector count
                drive->track.size = dwTrackSize; // store track size
+#ifndef GNW_DISABLE_COMPRESSION
                if (drive->is_compressed) {
                   compressedTrackSize = (*(pbPtr + 0xfe) + (*(pbPtr + 0xff) << 8));
                   if ((track == load_track) && (side == load_side)) {
                      lzma_inflate(
-                        (uint8_t *)drive->decompress_buffer,
+                        (uint8_t *)drive->track_buffer,
                         dwTrackSize, // Track size
                         (const uint8_t *)pbPtr+0x100,
                         compressedTrackSize);
-                     drive->track.data = drive->decompress_buffer;
+                     drive->track.data = drive->track_buffer;
                   }
-               } else {
+               } else
+#endif
+               {
                   drive->track.data = pbPtr + 0x100;
                }
 
@@ -948,9 +1093,12 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
                      pbPtr2 += 8;
                   }
                }
+#ifndef GNW_DISABLE_COMPRESSION
                if (drive->is_compressed) {
                   pbPtr += 0x100 + compressedTrackSize;
-               } else {
+               } else
+#endif
+               {
                   pbPtr += 0x100 + dwTrackSize;
                }
                if ((track == load_track) && (side == load_side)) {
@@ -969,6 +1117,7 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
          }
       }
    }
+#endif
 }
 #endif
 

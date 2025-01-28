@@ -178,7 +178,7 @@ int HandleExtension(char *path,char *ext);
 
 extern void kbd_update_table(int lang);
 
-#ifndef TARGET_GNW
+#if !defined(TARGET_GNW) || SD_CARD == 1
 extern char DISKA_NAME[512];
 extern char DISKB_NAME[512];
 extern char cart_name[512];
@@ -263,7 +263,7 @@ uint8_t keyboard_matrix[16];
 uint8_t *membank_config[8][4];
 
 #ifdef TARGET_GNW
-static uint8_t GPBuffer[16*1024]; // general purpose buffer
+uint8_t GPBuffer[16*1024]; // general purpose buffer
 static uint8_t RAM[CPC_MAX_RAM * 1024]; // RAM
 static uint8_t ROM[32 * 1024];
 //static uint8_t RegisterPage[16 * 1024];
@@ -2048,8 +2048,10 @@ void doCleanUp (void)
    dsk_eject(&driveA);
    dsk_eject(&driveB);
 
+#ifndef TARGET_GNW
    tape_eject();
    cpr_eject();
+#endif
 
    if (zip_info.pchFileNames)
       free(zip_info.pchFileNames);
@@ -2169,6 +2171,7 @@ int attach_disk(char *arv, int drive)
    return result;
 }
 
+#if defined(TARGET_GNW) && SD_CARD != 1
 int attach_disk_buffer(char *buffer, int drive)
 {
    int result = 1;
@@ -2186,6 +2189,7 @@ int attach_disk_buffer(char *buffer, int drive)
    }
    return result;
 }
+#endif
 
 int detach_disk(int drive)
 {
