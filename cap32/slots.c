@@ -285,33 +285,31 @@ int snapshot_load_mem (uint8_t *sna_buffer, uint32_t buffer_size) {
    return 0; // dump ok!
 }
 
-/*
-int cap32_save_state(fs_file_t *file) {
-   fs_write(file, (unsigned char *)&CPC, sizeof(t_CPC));
-   fs_write(file, (unsigned char *)&z80, sizeof(t_z80regs));
-   fs_write(file, (unsigned char *)&GateArray, sizeof(t_GateArray));
-   fs_write(file, (unsigned char *)&CRTC, sizeof(t_CRTC));
-   fs_write(file, (unsigned char *)&PPI, sizeof(t_PPI));
-   fs_write(file, (unsigned char *)&PSG, sizeof(t_PSG));
-   fs_write(file, (unsigned char *)&VDU, sizeof(t_VDU));
-   fs_write(file, (unsigned char *)&FDC, sizeof(t_FDC));
-   fs_write(file, (unsigned char *)pbRAM, 128*1024);
-   fs_write(file, (unsigned char *)&driveA.current_track, 4);
-   fs_write(file, (unsigned char *)&driveA.current_side, 4);
-   fs_write(file, (unsigned char *)&driveA.current_sector, 4);
+int cap32_save_state(FILE *file) {
+   fwrite((unsigned char *)&CPC, sizeof(t_CPC), 1, file);
+   fwrite((unsigned char *)&z80, sizeof(t_z80regs), 1, file);
+   fwrite((unsigned char *)&GateArray, sizeof(t_GateArray), 1, file);
+   fwrite((unsigned char *)&CRTC, sizeof(t_CRTC), 1, file);
+   fwrite((unsigned char *)&PPI, sizeof(t_PPI), 1, file);
+   fwrite((unsigned char *)&PSG, sizeof(t_PSG), 1, file);
+   fwrite((unsigned char *)&VDU, sizeof(t_VDU), 1, file);
+   fwrite((unsigned char *)&FDC, sizeof(t_FDC), 1, file);
+   fwrite((unsigned char *)pbRAM, 128*1024, 1, file);
+   fwrite((unsigned char *)&driveA.current_track, 4, 1, file);
+   fwrite((unsigned char *)&driveA.current_side, 4, 1, file);
+   fwrite((unsigned char *)&driveA.current_sector, 4, 1, file);
    return 0;
 }
 
-int cap32_load_state(fs_file_t *file) {
+int cap32_load_state(FILE *file) {
    int n;
    reg_pair port;
    uint8_t val;
 
-   fs_read(file, (unsigned char *)&CPC, sizeof(t_CPC));
-   fs_read(file, (unsigned char *)&z80, sizeof(t_z80regs));
+   fread((unsigned char *)&CPC, sizeof(t_CPC), 1, file);
+   fread((unsigned char *)&z80, sizeof(t_z80regs), 1, file);
 
-
-   fs_read(file, (unsigned char *)&GateArray, sizeof(t_GateArray));
+   fread((unsigned char *)&GateArray, sizeof(t_GateArray), 1, file);
    port.b.h = 0x7f;
    val = GateArray.pen;
    for (n = 0; n < 17; n++) { // loop for all colours + border
@@ -327,8 +325,7 @@ int cap32_load_state(fs_file_t *file) {
    val = GateArray.RAM_config; // GA RAM configuration
    z80_OUT_handler(port, (val & 0x3f) | (3 << 6));
 
-
-   fs_read(file, (unsigned char *)&CRTC, sizeof(t_CRTC));
+   fread((unsigned char *)&CRTC, sizeof(t_CRTC), 1, file);
    port.b.h = 0xbd;
    for (n = 0; n < 18; n++) { // loop for all CRTC registers
       val = CRTC.registers[n];
@@ -344,8 +341,7 @@ int cap32_load_state(fs_file_t *file) {
    val = GateArray.upper_ROM; // upper ROM number
    z80_OUT_handler(port, val);
 
-
-   fs_read(file, (unsigned char *)&PPI, sizeof(t_PPI));
+   fread((unsigned char *)&PPI, sizeof(t_PPI), 1, file);
    port.b.h = 0xf4; // port A
    z80_OUT_handler(port, PPI.portA);
    port.b.h = 0xf5; // port B
@@ -355,15 +351,13 @@ int cap32_load_state(fs_file_t *file) {
    port.b.h = 0xf7; // control
    z80_OUT_handler(port, PPI.control);
 
-
-   fs_read(file, (unsigned char *)&PSG, sizeof(t_PSG));
-   fs_read(file, (unsigned char *)&VDU, sizeof(t_VDU));
-   fs_read(file, (unsigned char *)&FDC, sizeof(t_FDC));
-   fs_read(file, (unsigned char *)pbRAM, 128*1024);
-   fs_read(file, (unsigned char *)&driveA.current_track, 4);
-   fs_read(file, (unsigned char *)&driveA.current_side, 4);
-   fs_read(file, (unsigned char *)&driveA.current_sector, 4);
-
+   fread((unsigned char *)&PSG, sizeof(t_PSG), 1, file);
+   fread((unsigned char *)&VDU, sizeof(t_VDU), 1, file);
+   fread((unsigned char *)&FDC, sizeof(t_FDC), 1, file);
+   fread((unsigned char *)pbRAM, 128*1024, 1, file);
+   fread((unsigned char *)&driveA.current_track, 4, 1, file);
+   fread((unsigned char *)&driveA.current_side, 4, 1, file);
+   fread((unsigned char *)&driveA.current_sector, 4, 1, file);
 
    driveA.loaded_track = -1;
    driveA.loaded_side = -1;
@@ -372,7 +366,6 @@ int cap32_load_state(fs_file_t *file) {
    cap32_fdc_load_track(&driveA, driveA.loaded_track, driveA.loaded_side);
    return 0;
 }
-*/
 
 
 /**
