@@ -881,7 +881,6 @@ void cap32_fdc_load_track(t_drive *drive,int load_track,int load_side)
                drive->track.sectors = dwSectors; // store sector count
                drive->track.size = dwTrackSize; // store track size
 
-               printf("1\n");
                if ((track == load_track) && (side == load_side)) {
                   pbDataPtr = drive->track.data; // pointer to start of memory buffer
                   pbPtr2 = pbPtr;
